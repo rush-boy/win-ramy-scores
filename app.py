@@ -35,15 +35,12 @@ mois_cle = st.sidebar.selectbox(
     index=list(MOIS_OPTIONS.keys()).index(f"{now.month:02d}")
 )
 
-# Clé dynamique pour forcer la mise à jour visuelle du tableau
-widget_key = f"editor_{mois_cle}_{annee_actuelle}"
 FILE_PATH = f"scores_{mois_cle}_{annee_actuelle}.csv"
 st.sidebar.info(f"📂 Fichier actif : `{FILE_PATH}`")
 
 # Liste officielle des joueurs
 liste_joueurs = ['MR', 'MT', 'Kathaï', 'Sissy', 'Maxou', 'Seb', 'Stéphanou', 'Mickaël', 'Céline']
 
-# Fonction pour détecter les week-ends
 def est_un_weekend(chaine_date):
     val = str(chaine_date).lower()
     return "sam" in val or "dim" in val
@@ -57,12 +54,9 @@ def charger_donnees_mensuelles(file_name):
             csv_data = file_content.decoded_content.decode('utf-8')
             df = pd.read_csv(io.StringIO(csv_data), index_col=0)
             
-            # Forcer le format texte
             for j in df.columns:
                 df[j] = df[j].fillna('').astype(str).str.replace('None', '').str.replace('nan', '')
             
-            # Suppression stricte des lignes de week-end potentiellement enregistrées
-            df = df[~df.index.to_series().apply(est_un_weekend)]
             return repo, file_content.sha, df
         except Exception:
             # Génération d'un nouveau mois vierge du Lundi au Vendredi
@@ -86,55 +80,73 @@ def charger_donnees_mensuelles(file_name):
 current_repo, file_sha, df_mois = charger_donnees_mensuelles(FILE_PATH)
 
 if not df_mois.empty:
-    st.subheader(f"📝 Tableau de {MOIS_OPTIONS[mois_cle]} {annee_actuelle} (Week-ends définitivement masqués)")
+    st.subheader(f"📝 Tableau de {MOIS_OPTIONS[mois_cle]} {annee_actuelle}")
     
-    # Sécurité visuelle : s'assurer qu'aucun week-end ne passe
-    df_mois = df_mois[~df_mois.index.to_series().apply(est_un_weekend)]
+    # --- BOUTON DE NETTOYAGE FORCÉ DES ANCIENS FICHIERS ---
+    deja_des_weekends = df_mois.index.to_series().apply(est_un_weekend).any()
+    if deja_des_weekends:
+        st.error("⚠️ Ce tableau contient d'anciennes lignes de week-end stockées sur GitHub.")
+        if st.button("🧹 Forcer la suppression des week-ends sur ce mois", type="secondary"):
+            df_nettoye = df_mois[~df_mois.index.to_series().apply(est_un_weekend)]
+            try:
+                csv_buffer = io.StringIO()
+                df_nettoye.to_csv(csv_buffer)
+                if file_sha:
+                    current_repo.update_file(
+                        path=FILE_PATH,
+                        message="Nettoyage forcé des week-ends",
+                        content=csv_buffer.getvalue(),
+                        sha=file_sha
+                    )
+                    st.success("✨ Week-ends supprimés avec succès ! Rechargement...")
+                    st.cache_data.clear()
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Erreur de nettoyage : {e}")
 
-    # Forcer la configuration des colonnes en texte libre
+    # Filtrage visuel
+    df_affichage = df_mois[~df_mois.index.to_series().apply(est_un_weekend)]
+
     configuration_colonnes = {
         joueur: st.column_config.TextColumn(label=joueur, default="") 
-        for joueur in df_mois.columns
+        for joueur in df_affichage.columns
     }
 
-    # Éditeur interactif
+    # Éditeur interactif lié au filtre temporel (la clé change s'il y a des week-ends ou non)
+    widget_key = f"editor_{mois_cle}_{annee_actuelle}_{deja_des_weekends}"
     edited_df = st.data_editor(
-        df_mois, 
+        df_affichage, 
         column_config=configuration_colonnes,
         use_container_width=True,
         key=widget_key
     )
 
-    # Bouton de sauvegarde persistante
-    if st.button(f"💾 Enregistrer le tableau épuré sur GitHub", type="primary"):
+    # Bouton de sauvegarde
+    if st.button(f"💾 Enregistrer les modifications", type="primary"):
         if current_repo:
             try:
-                # Filtrage avant écriture finale
                 df_sauvegarde = edited_df.copy()
-                df_sauvegarde = df_sauvegarde[~df_sauvegarde.index.to_series().apply(est_un_weekend)]
-                
                 for col in df_sauvegarde.columns:
                     df_sauvegarde[col] = df_sauvegarde[col].astype(str).str.replace('None', '').str.replace('nan', '')
                 
                 csv_buffer = io.StringIO()
                 df_sauvegarde.to_csv(csv_buffer)
-                nouveau_contenu = csv_buffer.getvalue()
                 
                 if file_sha:
                     current_repo.update_file(
                         path=FILE_PATH,
-                        message=f"Nettoyage complet et retrait des week-ends - {MOIS_OPTIONS[mois_cle]}",
-                        content=nouveau_contenu,
+                        message=f"Mise à jour des scores pour {MOIS_OPTIONS[mois_cle]}",
+                        content=csv_buffer.getvalue(),
                         sha=file_sha
                     )
                 else:
                     current_repo.create_file(
                         path=FILE_PATH,
-                        message=f"Création du tableau de semaine - {MOIS_OPTIONS[mois_cle]}",
-                        content=nouveau_contenu
+                        message=f"Création du tableau pour {MOIS_OPTIONS[mois_cle]}",
+                        content=csv_buffer.getvalue()
                     )
                 
-                st.success(f"✅ Le fichier a été nettoyé et sauvegardé sans les week-ends !")
+                st.success(f"✅ Enregistré !")
                 st.cache_data.clear()
                 st.rerun()
             except Exception as error:

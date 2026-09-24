@@ -15,7 +15,6 @@ try:
     g = Github(GITHUB_TOKEN)
     repo = g.get_repo(REPO_NAME)
 except Exception as e:
-    st.error("⚠️ Les configurations de sauvegarde (Secrets) ne sont pas prêtes.")
     repo = None
 
 # --- SECTION : SÉLECTION DU MOIS ---
@@ -56,92 +55,58 @@ def generer_jours_ouvres():
 
 dates_semaine_attendues = generer_jours_ouvres()
 
-def generer_tableau_vierge():
-    init_data = {j: [''] * len(dates_semaine_attendues) for j in liste_joueurs}
-    init_data['DATE'] = dates_semaine_attendues
-    return pd.DataFrame(init_data).set_index('DATE')
+# --- BASE DE DONNÉES INJECTÉE POUR SEPTEMBRE ---
+def generer_tableau_defaut():
+    if mois_cle == "09" and str(annee_actuelle) == "2026":
+        # Injection directe des scores du scan de septembre pour contourner le bug d'importation
+        donnees_septembre = {
+            'MR': ['/', '/', 'msk', 'msk', 'X', '/', 'msk', '/', 'X', '/', 'msk', '/', 'msk', '/', '', 'X', '/', 'X', '', '', '', ''],
+            'MT': ['msk', 'X', 'X', 'X', '/', '/', '', '', 'msk', '', 'X', 'X', '', '', '', '/', 'X', 'msk', '', '', '', ''],
+            'Kathaï': ['X', '/', '', 'X', '/', 'X', 'X', '', 'X', '/', '', 'X', '/', '', '', '', 'X', 'msk', '', '', '', ''],
+            'Sissy': ['X', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+            'Maxou': ['', '', '', '', 'msk', 'msk', 'X', '', '', '', 'X', '/', '', '', '', 'msk', '', '', '', '', '', ''],
+            'Seb': ['', 'msk', '', '', '', '', '/', '', '', 'msk', 'msk', 'msk', '/', '', '', '/', '', '', '', '', '', ''],
+            'Stéphanou': ['msk', 'X', '/', '', 'msk', '', '', 'msk', '', '', '', '', 'X', 'msk', '', 'msk', 'msk', '/', '', '', '', ''],
+            'Mickaël': ['', '', '', '', '', '/', '', '', '', '/', '', '', 'X', '/', '', '', 'msk', '', '', '', '', ''],
+            'Céline': ['/', 'msk', '/', 'msk', 'X', '/', '/', 'X', '/', 'X', '/', 'msk', 'msk', 'X', '', 'X', '/', 'X', '', '', '', '']
+        }
+        df = pd.DataFrame(donnees_septembre, index=dates_semaine_attendues)
+        df.index.name = 'DATE'
+        return df
+    else:
+        init_data = {j: [''] * len(dates_semaine_attendues) for j in liste_joueurs}
+        init_data['DATE'] = dates_semaine_attendues
+        return pd.DataFrame(init_data).set_index('DATE')
 
 if st.sidebar.button("🔄 Forcer la synchronisation (Vider le cache)"):
     st.cache_data.clear()
     st.rerun()
 
-# --- FONCTION DE CHARGEMENT SÉCURISÉE ---
+# --- FONCTION DE CHARGEMENT ---
 @st.cache_data(ttl=2)
 def charger_donnees_mensuelles(file_name):
     if not repo:
-        return None, None, generer_tableau_vierge()
+        return None, None, generer_tableau_defaut()
     try:
         file_content = repo.get_contents(file_name)
         csv_data = file_content.decoded_content.decode('utf-8-sig')
         
         if not csv_data.strip():
-            return repo, file_content.sha, generer_tableau_vierge()
+            return repo, file_content.sha, generer_tableau_defaut()
             
         df = pd.read_csv(io.StringIO(csv_data), index_col=0)
         
         if df.empty or len(df.columns) == 0:
-            return repo, file_content.sha, generer_tableau_vierge()
+            return repo, file_content.sha, generer_tableau_defaut()
             
         for j in df.columns:
             df[j] = df[j].fillna('').astype(str).str.replace('None', '').str.replace('nan', '')
         
         return repo, file_content.sha, df
     except Exception:
-        return repo, None, generer_tableau_vierge()
+        return repo, None, generer_tableau_defaut()
 
 current_repo, file_sha, df_mois = charger_donnees_mensuelles(FILE_PATH)
-
-# --- ZONE D'IMPORTATION ---
-st.markdown("### 📥 Importer un fichier de scores fourni par l'IA")
-fichier_importe = st.file_uploader(f"Glissez ici le fichier CSV pour {MOIS_OPTIONS[mois_cle]} {annee_actuelle}", type=["csv"])
-
-if fichier_importe is not None and current_repo:
-    if st.button("🚀 Valider l'importation et écraser le tableau actuel", type="secondary"):
-        try:
-            bytes_data = fichier_importe.read()
-            texte_decode = bytes_data.decode("utf-8-sig", errors="ignore")
-            
-            df_imp = pd.read_csv(io.StringIO(texte_decode))
-            
-            if "mar" in str(df_imp.iloc).lower() or "lun" in str(df_imp.iloc).lower() or "/" in str(df_imp.iloc):
-                df_imp = df_imp.iloc[:, 1:]
-            
-            df_final = generer_tableau_vierge()
-            
-            for joueur in liste_joueurs:
-                colonne_trouvee = None
-                for c_imp in df_imp.columns:
-                    if str(c_imp).strip().lower() == joueur.lower():
-                        colonne_trouvee = c_imp
-                        break
-                
-                if colonne_trouvee is not None:
-                    for i in range(min(len(df_final), len(df_imp))):
-                        valeur_brute = str(df_imp.loc[i, colonne_trouvee]).strip()
-                        if valeur_brute.lower() in ['none', 'nan', 'null']:
-                            valeur_brute = ''
-                        df_final.iloc[i, df_final.columns.get_loc(joueur)] = valeur_brute
-
-            csv_buffer = io.StringIO()
-            df_final.to_csv(csv_buffer)
-            contenu_imp = csv_buffer.getvalue()
-            
-            try:
-                fichier_existant = current_repo.get_contents(FILE_PATH)
-                sha_actuel = fichier_existant.sha
-            except Exception:
-                sha_actuel = None
-            
-            if sha_actuel:
-                current_repo.update_file(path=FILE_PATH, message="Importation alignee reussie", content=contenu_imp, sha=sha_actuel)
-            else:
-                current_repo.create_file(path=FILE_PATH, message="Creation par importation alignee", content=contenu_imp)
-                
-            st.success("✅ Le tableau de {MOIS_OPTIONS[mois_cle]} a été complété avec succès !")
-            st.cache_data.clear()
-            st.rerun()
-        except Exception as e:
-            st.error(f"Erreur lors de l'importation : {e}")
 
 st.markdown("---")
 
@@ -152,7 +117,7 @@ if df_mois is not None and not df_mois.empty:
     df_mois.index.name = "DATE"
     
     if list(df_mois.index) != dates_semaine_attendues:
-        df_mois = generer_tableau_vierge()
+        df_mois = generer_tableau_defaut()
 
     configuration_colonnes = {}
     for joueur in liste_joueurs:
@@ -193,6 +158,8 @@ if df_mois is not None and not df_mois.empty:
                 st.rerun()
             except Exception as error:
                 st.error(f"Erreur de sauvegarde : {error}")
+        else:
+            st.warning("⚠️ Mode local : Modifications éditées à l'écran mais non sauvegardées sur GitHub (Vérifiez vos secrets Streamlit).")
 
     # --- SECTION CALCULS ---
     st.markdown("---")
@@ -239,8 +206,19 @@ if df_mois is not None and not df_mois.empty:
         if len(classement_trie) > 0:
             pod1, pod2, pod3 = st.columns(3)
             
-            # Extraction propre et sécurisée par index
             if len(classement_trie) >= 1:
-                p1_name = classement_trie[0][0]
-                p1_score = classement_trie[0][1][0]
-                p1_j = classement_trie[0][1][1]
+                pod1.metric(label=f"🥇 1er : {classement_trie[0][0]}", value=f"{classement_trie[0][1][0]} pts", delta=f"{classement_trie[0][1][1]} jours")
+                
+            if len(classement_trie) >= 2:
+                pod2.metric(label=f"🥈 2e : {classement_trie[1][0]}", value=f"{classement_trie[1][1][0]} pts", delta=f"{classement_trie[1][1][1]} jours")
+                
+            if len(classement_trie) >= 3:
+                pod3.metric(label=f"🥉 3e : {classement_trie[2][0]}", value=f"{classement_trie[2][1][0]} pts", delta=f"{classement_trie[2][1][1]} jours")
+        else:
+            st.info("Aucun joueur qualifié pour le moment.")
+                
+        st.markdown("---")
+        st.subheader("📋 Classement Général des Qualifiés")
+        if len(classement_trie) > 0:
+            donnees_classement = []
+            for rang, (joueur, (score, jours)) in enumerate(classement_trie, start=1):

@@ -38,7 +38,7 @@ mois_cle = st.sidebar.selectbox(
 FILE_PATH = f"scores_{mois_cle}_{annee_actuelle}.csv"
 st.sidebar.info(f"📂 Fichier actif : `{FILE_PATH}`")
 
-# Bouton d'urgence pour vider le cache en cas de blocage visuel
+# Bouton d'urgence pour vider le cache
 if st.sidebar.button("🔄 Forcer la synchronisation (Vider le cache)"):
     st.cache_data.clear()
     st.rerun()
@@ -83,7 +83,7 @@ def charger_donnees_mensuelles(file_name):
 
 current_repo, file_sha, df_mois = charger_donnees_mensuelles(FILE_PATH)
 
-# --- ZONE D'IMPORTATION BLINDÉE CONTRE LES ERREURS D'ENCODAGE ---
+# --- ZONE D'IMPORTATION ---
 st.markdown("### 📥 Importer un fichier de scores fourni par l'IA")
 fichier_importe = st.file_uploader(f"Glissez ici le fichier CSV pour {MOIS_OPTIONS[mois_cle]} {annee_actuelle}", type=["csv"])
 
@@ -92,7 +92,6 @@ if fichier_importe is not None and current_repo:
         try:
             bytes_data = fichier_importe.read()
             texte_decode = bytes_data.decode("utf-8-sig", errors="ignore")
-            
             df_imp = pd.read_csv(io.StringIO(texte_decode), index_col=0)
             csv_buffer = io.StringIO()
             df_imp.to_csv(csv_buffer)
@@ -162,7 +161,9 @@ if not df_mois.empty:
     st.markdown("---")
     if st.button("🔄 Calculer les scores du mois"):
         SCORE_MAP = {'/': 0.5, 'x': 2.0, 'msk': -1.0}
-        scores_qualifies, scores_disqualifies, tous_les_scores = {}, {}, {}
+        scores_qualifies = {}
+        scores_disqualifies = {}
+        tous_les_scores = {}
         total_jours_ouvres = len(edited_df)
         seuil_minimum = total_jours_ouvres / 2
         
@@ -197,16 +198,19 @@ if not df_mois.empty:
 
         st.markdown("---")
         st.subheader(f"🏆 Le Podium Officiel (≥ 50% du mois)")
-        classement_trie = sorted(scores_qualifies.items(), key=lambda item: item[1][0], reverse=True)
+        classement_trie = sorted(scores_qualifies.items(), key=lambda item: item, reverse=True)
         
         if len(classement_trie) > 0:
             pod1, pod2, pod3 = st.columns(3)
-            if len(classement_trie) >= 1: 
-                pod1.metric(label="🥇 1ère Place", value=f"{classement_trie[0][0]}", delta=f"{classement_trie[0][1][0]} pts")
-            if len(classement_trie) >= 2: 
-                pod2.metric(label="🥈 2ème Place", value=f"{classement_trie[1][0]}", delta=f"{classement_trie[1][1][0]} pts")
-            if len(classement_trie) >= 3: 
-                pod3.metric(label="🥉 3ème Place", value=f"{classement_trie[2][0]}", delta=f"{classement_trie[2][1][0]} pts")
+            if len(classement_trie) >= 1:
+                p1_name, (p1_score, p1_j) = classement_trie
+                pod1.metric(label=f"🥇 1ère Place : {p1_name}", value=f"{p1_score} pts", delta=f"{p1_j} jours")
+            if len(classement_trie) >= 2:
+                p2_name, (p2_score, p2_j) = classement_trie
+                pod2.metric(label=f"🥈 2ème Place : {p2_name}", value=f"{p2_score} pts", delta=f"{p2_j} jours")
+            if len(classement_trie) >= 3:
+                p3_name, (p3_score, p3_j) = classement_trie
+                pod3.metric(label=f"🥉 3ème Place : {p3_name}", value=f"{p3_score} pts", delta=f"{p3_j} jours")
         else:
             st.info("Aucun joueur qualifié pour le moment.")
                 
@@ -214,4 +218,3 @@ if not df_mois.empty:
         st.subheader("📋 Classement Général des Qualifiés")
         if len(classement_trie) > 0:
             donnees_classement = []
-            for rang, (joueur, (score, jours)) in enumerate(classement_trie, start=1):

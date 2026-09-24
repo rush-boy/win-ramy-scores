@@ -66,7 +66,7 @@ if st.sidebar.button("🔄 Forcer la synchronisation (Vider le cache)"):
     st.cache_data.clear()
     st.rerun()
 
-# --- FONCTION DE CHARGEMENT SÉCURISÉE CONTRE LA PAGE BLANCHE ---
+# --- FONCTION DE CHARGEMENT SÉCURISÉE ---
 @st.cache_data(ttl=2)
 def charger_donnees_mensuelles(file_name):
     if not repo:
@@ -75,13 +75,11 @@ def charger_donnees_mensuelles(file_name):
         file_content = repo.get_contents(file_name)
         csv_data = file_content.decoded_content.decode('utf-8-sig')
         
-        # Si le fichier sur GitHub est vide, on intercepte l'erreur pour éviter le crash
         if not csv_data.strip():
             return repo, file_content.sha, generer_tableau_vierge()
             
         df = pd.read_csv(io.StringIO(csv_data), index_col=0)
         
-        # Sécurité : Si le fichier n'a pas de colonnes ou est mal structuré, on applique la structure officielle
         if df.empty or len(df.columns) == 0:
             return repo, file_content.sha, generer_tableau_vierge()
             
@@ -90,12 +88,11 @@ def charger_donnees_mensuelles(file_name):
         
         return repo, file_content.sha, df
     except Exception:
-        # Si le fichier n'existe pas du tout, on renvoie un tableau vierge proprement
         return repo, None, generer_tableau_vierge()
 
 current_repo, file_sha, df_mois = charger_donnees_mensuelles(FILE_PATH)
 
-# --- ZONE D'IMPORTATION BLINDÉE ---
+# --- ZONE D'IMPORTATION ---
 st.markdown("### 📥 Importer un fichier de scores fourni par l'IA")
 fichier_importe = st.file_uploader(f"Glissez ici le fichier CSV pour {MOIS_OPTIONS[mois_cle]} {annee_actuelle}", type=["csv"])
 
@@ -105,11 +102,9 @@ if fichier_importe is not None and current_repo:
             bytes_data = fichier_importe.read()
             texte_decode = bytes_data.decode("utf-8-sig", errors="ignore")
             
-            # Lecture brute du fichier importé
             df_imp = pd.read_csv(io.StringIO(texte_decode), index_col=0)
             df_imp.index.name = "DATE"
             
-            # Nettoyage des cellules
             for j in df_imp.columns:
                 df_imp[j] = df_imp[j].fillna('').astype(str).str.replace('None', '').str.replace('nan', '')
             
@@ -117,7 +112,6 @@ if fichier_importe is not None and current_repo:
             df_imp.to_csv(csv_buffer)
             contenu_imp = csv_buffer.getvalue()
             
-            # Récupération en temps réel du SHA pour éviter le conflit 422
             try:
                 fichier_existant = current_repo.get_contents(FILE_PATH)
                 sha_actuel = fichier_existant.sha
@@ -137,14 +131,12 @@ if fichier_importe is not None and current_repo:
 
 st.markdown("---")
 
-# --- AFFICHAGE DE LA GRILLE (GARANTIE SANS CRASH) ---
+# --- AFFICHAGE DE LA GRILLE ---
 if df_mois is not None and not df_mois.empty:
     st.subheader(f"📝 Tableau de {MOIS_OPTIONS[mois_cle]} {annee_actuelle}")
     
-    # S'assurer que l'index s'appelle DATE
     df_mois.index.name = "DATE"
     
-    # Bouton de synchronisation si les dates ne correspondent pas
     if list(df_mois.index) != dates_semaine_attendues:
         st.warning("⚙️ Le format des dates de ce mois a besoin d'être synchronisé du Lundi au Vendredi.")
         if st.button("🔧 Appliquer le calendrier de la semaine", type="secondary"):
@@ -166,7 +158,6 @@ if df_mois is not None and not df_mois.empty:
             except Exception as e:
                 st.error(f"Erreur : {e}")
 
-    # Forcer l'affichage de toutes les colonnes des joueurs en texte libre
     configuration_colonnes = {}
     for joueur in liste_joueurs:
         if joueur in df_mois.columns:
@@ -174,7 +165,6 @@ if df_mois is not None and not df_mois.empty:
 
     widget_key = f"grid_editor_{mois_cle}_{annee_actuelle}_{len(df_mois)}"
     
-    # Affichage sécurisé de l'éditeur
     edited_df = st.data_editor(
         df_mois, 
         column_config=configuration_colonnes,
@@ -182,7 +172,6 @@ if df_mois is not None and not df_mois.empty:
         key=widget_key
     )
 
-    # Bouton de sauvegarde manuelle
     if st.button(f"💾 Enregistrer les modifications", type="primary"):
         if current_repo:
             try:
@@ -209,23 +198,41 @@ if df_mois is not None and not df_mois.empty:
             except Exception as error:
                 st.error(f"Erreur de sauvegarde : {error}")
 
-    # --- SECTION CALCULS ET PODIUM ---
+    # --- SECTION CALCULS ---
     st.markdown("---")
     if st.button("🔄 Calculer les scores du mois"):
         SCORE_MAP = {'/': 0.5, 'x': 2.0, 'msk': -1.0}
-        scores_qualifies, scores_disqualifies, tous_les_scores = {}, {}, {}
+        scores_qualifies = {}
+        scores_disqualifies = {}
+        tous_les_scores = {}
         total_jours_ouvres = len(edited_df)
         seuil_minimum = total_jours_ouvres / 2
         
         for joueur in edited_df.columns:
-            if joueur in liste_joueurs:
-                total = 0.0
-                valeurs = edited_df[joueur].astype(str).str.strip().str.lower().replace(['msr', 'mok', 'nsk', 'none', 'nan'], 'msk')
-                jours_joues = valeurs.apply(lambda x: x in ['/', 'x', 'msk']).sum()
-                
-                for symbole, points in SCORE_MAP.items():
-                    count = valeurs.str.count(r'/').sum() if symbole == '/' else (valeurs == symbole).sum()
-                    total += count * points
-                
-                tous_les_scores[joueur] = (total, jours_joues)
-                if jours_joues >= seuil_minimum:
+            total = 0.0
+            valeurs = edited_df[joueur].astype(str).str.strip().str.lower()
+            valeurs = valeurs.replace(['msr', 'mok', 'nsk', 'none', 'nan'], 'msk')
+            jours_joues = valeurs.apply(lambda x: x in ['/', 'x', 'msk']).sum()
+            
+            for symbole, points in SCORE_MAP.items():
+                if symbole == '/':
+                    count = valeurs.str.count(r'/').sum()
+                else:
+                    count = (valeurs == symbole).sum()
+                total += count * points
+            
+            tous_les_scores[joueur] = (total, jours_joues)
+            
+            if jours_joues >= seuil_minimum:
+                scores_qualifies[joueur] = (total, jours_joues)
+            else:
+                scores_disqualifies[joueur] = (total, jours_joues)
+        
+        st.subheader("📊 Scores Totaux en Cours (Tout le monde)")
+        cols = st.columns(len(tous_les_scores))
+        for idx, (joueur, (total, jours)) in enumerate(tous_les_scores.items()):
+            with cols[idx]:
+                statut_text = f"{jours}/{total_jours_ouvres}j"
+                if jours < seuil_minimum:
+                    st.metric(label=f"{joueur} ⚠️", value=f"{total} pts", delta=f"Incomplet ({statut_text})", delta_color="inverse")
+                else:

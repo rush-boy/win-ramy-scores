@@ -35,7 +35,7 @@ mois_cle = st.sidebar.selectbox(
     index=list(MOIS_OPTIONS.keys()).index(f"{now.month:02d}")
 )
 
-# Utilisation d'une clé dynamique pour forcer Streamlit à casser son cache visuel lors du changement de mois
+# Clé dynamique pour forcer la mise à jour visuelle du tableau
 widget_key = f"editor_{mois_cle}_{annee_actuelle}"
 FILE_PATH = f"scores_{mois_cle}_{annee_actuelle}.csv"
 st.sidebar.info(f"📂 Fichier actif : `{FILE_PATH}`")
@@ -43,7 +43,7 @@ st.sidebar.info(f"📂 Fichier actif : `{FILE_PATH}`")
 # Liste officielle des joueurs
 liste_joueurs = ['MR', 'MT', 'Kathaï', 'Sissy', 'Maxou', 'Seb', 'Stéphanou', 'Mickaël', 'Céline']
 
-# Fonction stricte de nettoyage des lignes de week-end
+# Fonction pour détecter les week-ends
 def est_un_weekend(chaine_date):
     val = str(chaine_date).lower()
     return "sam" in val or "dim" in val
@@ -61,7 +61,7 @@ def charger_donnees_mensuelles(file_name):
             for j in df.columns:
                 df[j] = df[j].fillna('').astype(str).str.replace('None', '').str.replace('nan', '')
             
-            # Nettoyage absolu : on retire les lignes contenant du week-end
+            # Suppression stricte des lignes de week-end potentiellement enregistrées
             df = df[~df.index.to_series().apply(est_un_weekend)]
             return repo, file_content.sha, df
         except Exception:
@@ -88,16 +88,16 @@ current_repo, file_sha, df_mois = charger_donnees_mensuelles(FILE_PATH)
 if not df_mois.empty:
     st.subheader(f"📝 Tableau de {MOIS_OPTIONS[mois_cle]} {annee_actuelle} (Week-ends définitivement masqués)")
     
-    # Sécurité supplémentaire : Ré-application du filtre anti week-end juste avant l'affichage
+    # Sécurité visuelle : s'assurer qu'aucun week-end ne passe
     df_mois = df_mois[~df_mois.index.to_series().apply(est_un_weekend)]
 
-    # Forcer la configuration texte
+    # Forcer la configuration des colonnes en texte libre
     configuration_colonnes = {
         joueur: st.column_config.TextColumn(label=joueur, default="") 
         for joueur in df_mois.columns
     }
 
-    # Éditeur interactif avec clé unique pour briser la mémoire de l'ancien tableau
+    # Éditeur interactif
     edited_df = st.data_editor(
         df_mois, 
         column_config=configuration_colonnes,
@@ -109,7 +109,7 @@ if not df_mois.empty:
     if st.button(f"💾 Enregistrer le tableau épuré sur GitHub", type="primary"):
         if current_repo:
             try:
-                # Filtrage ultime avant l'écriture dans le fichier CSV
+                # Filtrage avant écriture finale
                 df_sauvegarde = edited_df.copy()
                 df_sauvegarde = df_sauvegarde[~df_sauvegarde.index.to_series().apply(est_un_weekend)]
                 
@@ -124,7 +124,7 @@ if not df_mois.empty:
                     current_repo.update_file(
                         path=FILE_PATH,
                         message=f"Nettoyage complet et retrait des week-ends - {MOIS_OPTIONS[mois_cle]}",
-                        content=nouveau_contents := nouveau_contenu,
+                        content=nouveau_contenu,
                         sha=file_sha
                     )
                 else:
@@ -136,7 +136,7 @@ if not df_mois.empty:
                 
                 st.success(f"✅ Le fichier a été nettoyé et sauvegardé sans les week-ends !")
                 st.cache_data.clear()
-                st.rerun() # Forcer le rechargement immédiat de l'interface
+                st.rerun()
             except Exception as error:
                 st.error(f"Erreur lors de la sauvegarde : {error}")
 

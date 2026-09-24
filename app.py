@@ -2,79 +2,109 @@ import streamlit as st
 import pandas as pd
 from github import Github
 import io
+import datetime
 
-st.set_page_config(page_title="Win Ramy - Sauvegarde Automatique", layout="wide")
-st.title("🏆 Win Ramy Force à la Miskine - Gestionnaire des Scores")
+st.set_page_config(page_title="Win Ramy - Historique Mensuel", layout="wide")
+st.title("🏆 Win Ramy Force à la Miskine - Gestionnaire Multimois")
 
-# Configurer l'accès à GitHub sécurisé via Streamlit Secrets
-# Nous allons configurer ces 3 variables à l'étape suivante
+# Configuration de l'accès à GitHub
 try:
-    REPO_NAME = st.secrets["GITHUB_REPO"]       # Exemple: "votre-pseudo/win-ramy-scores"
-    GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]   # Votre clé d'accès privée
-    FILE_PATH = "scores.csv"                    # Le nom du fichier de données sur GitHub
+    REPO_NAME = st.secrets["GITHUB_REPO"]
+    GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
     
     g = Github(GITHUB_TOKEN)
     repo = g.get_repo(REPO_NAME)
 except Exception as e:
-    st.error("⚠️ Les configurations de sauvegarde (Secrets) ne sont pas encore prêtes.")
+    st.error("⚠️ Les configurations de sauvegarde (Secrets) ne sont pas prêtes.")
     repo = None
 
-# 1. Chargement des données depuis GitHub (ou données par défaut)
-@st.cache_data(ttl=10) # Rafraîchir le cache toutes les 10 secondes
-def charger_donnees_github():
+# --- SECTION : SÉLECTION DU MOIS ---
+st.sidebar.header("📅 Navigation Temporelle")
+
+# Liste des mois pour le menu déroulant
+MOIS_OPTIONS = {
+    "01": "Janvier", "02": "Février", "03": "Mars", "04": "Avril", 
+    "05": "Mai", "06": "Juin", "07": "Juillet", "08": "Août", 
+    "09": "Septembre", "10": "Octobre", "11": "Novembre", "12": "Décembre"
+}
+
+# Année actuelle et mois actuel par défaut
+now = datetime.datetime.now()
+annee_actuelle = st.sidebar.selectbox("Année", [now.year, now.year - 1], index=0)
+mois_cle = st.sidebar.selectbox(
+    "Mois", 
+    list(MOIS_OPTIONS.keys()), 
+    index=list(MOIS_OPTIONS.keys()).index(f"{now.month:02d}")
+)
+
+# Nom du fichier unique pour le mois sélectionné (ex: scores_09_2026.csv)
+FILE_PATH = f"scores_{mois_cle}_{annee_actuelle}.csv"
+st.sidebar.info(f"📂 Fichier actif : `{FILE_PATH}`")
+
+# --- FONCTION DE CHARGEMENT DES DONNÉES ---
+@st.cache_data(ttl=5)
+def charger_donnees_mensuelles(file_name):
     if repo:
         try:
-            file_content = repo.get_contents(FILE_PATH)
+            # Tenter de lire le fichier spécifique sur GitHub
+            file_content = repo.get_contents(file_name)
             csv_data = file_content.decoded_content.decode('utf-8')
-            return pd.read_csv(io.StringIO(csv_data), index_col=0)
+            return repo, file_content.sha, pd.read_csv(io.StringIO(csv_data), index_col=0)
         except Exception:
-            # Si le fichier n'existe pas encore sur GitHub, créer une structure vide
+            # Si le fichier n'existe pas encore pour ce mois, on crée une structure vide par défaut
             joueurs = ['MR', 'MT', 'Kathaï', 'Sissy', 'Maxou', 'Seb', 'Stéphanou', 'Mickaël', 'Céline']
-            dates = [f"Jour {i}" for i in range(1, 31)]
+            # Générer les jours du mois de 01 à 31 (ou 30 selon le besoin)
+            dates = [f"{i:02d}/{mois_cle}" for i in range(1, 32)]
             init_data = {j: [''] * len(dates) for j in joueurs}
             init_data['DATE'] = dates
-            return pd.DataFrame(init_data).set_index('DATE')
-    return pd.DataFrame()
+            df_vierge = pd.DataFrame(init_data).set_index('DATE')
+            return repo, None, df_vierge
+    return None, None, pd.DataFrame()
 
-# Charger les données courantes
-df_actuel = charger_donnees_github()
+# Charger les données spécifiques au mois choisi
+current_repo, file_sha, df_mois = charger_donnees_mensuelles(FILE_PATH)
 
-if not df_actuel.empty:
-    st.subheader("📝 Saisie et modification des données")
-    st.write("Modifiez les cases, puis cliquez sur le bouton vert tout en bas pour sauvegarder vos modifications.")
+if not df_mois.empty:
+    st.subheader(f"📝 Tableau de {MOIS_OPTIONS[mois_cle]} {annee_actuelle}")
+    
+    if file_sha is None:
+        st.warning(f"ℹ️ Aucun historique trouvé pour ce mois. Un nouveau tableau vierge a été généré ci-dessous.")
 
     # Éditeur interactif
-    edited_df = st.data_editor(df_actuel, use_container_width=True)
+    edited_df = st.data_editor(df_mois, use_container_width=True)
 
     # Bouton de sauvegarde persistante
-    if st.button("💾 Sauvegarder les modifications sur GitHub", type="primary"):
-        if repo:
+    if st.button(f"💾 Sauvegarder {MOIS_OPTIONS[mois_cle]} sur GitHub", type="primary"):
+        if current_repo:
             try:
-                # Convertir le tableau modifié en texte CSV
                 csv_buffer = io.StringIO()
                 edited_df.to_csv(csv_buffer)
                 nouveau_contenu = csv_buffer.getvalue()
                 
-                # Récupérer l'ancien fichier pour avoir son identifiant unique (sha)
-                contents = repo.get_contents(FILE_PATH)
+                if file_sha:
+                    # Mettre à jour le fichier existant
+                    current_repo.update_file(
+                        path=FILE_PATH,
+                        message=f"Mise à jour des scores pour {MOIS_OPTIONS[mois_cle]} {annee_actuelle}",
+                        content=nouveau_contenu,
+                        sha=file_sha
+                    )
+                else:
+                    # Créer un tout nouveau fichier s'il n'existait pas
+                    current_repo.create_file(
+                        path=FILE_PATH,
+                        message=f"Initialisation de l'historique pour {MOIS_OPTIONS[mois_cle]} {annee_actuelle}",
+                        content=nouveau_contenu
+                    )
                 
-                # Mettre à jour le fichier sur GitHub
-                repo.update_file(
-                    path=FILE_PATH,
-                    message="Mise à jour automatique des scores via l'application Streamlit",
-                    content=nouveau_contenu,
-                    sha=contents.sha
-                )
-                st.success("✅ Données enregistrées avec succès sur GitHub ! Vos amis verront le tableau mis à jour.")
-                st.cache_data.clear() # Forcer le rechargement de la page
+                st.success(f"✅ Historique de {MOIS_OPTIONS[mois_cle]} enregistré avec succès !")
+                st.cache_data.clear()
             except Exception as error:
                 st.error(f"Erreur lors de la sauvegarde : {error}")
-        else:
-            st.error("Impossible de sauvegarder : la connexion à GitHub n'est pas configurée.")
 
     # Section Calcul des scores
     st.markdown("---")
-    if st.button("🔄 Calculer les scores totaux"):
+    if st.button("🔄 Calculer les totaux du mois sélectionné"):
         SCORE_MAP = {'/': 0.5, 'x': 2.0, 'msk': -1.0}
         scores_totaux = {}
         
@@ -88,7 +118,7 @@ if not df_actuel.empty:
                 total += count * points
             scores_totaux[joueur] = total
             
-        st.subheader("📊 Résultats en direct")
+        st.subheader(f"📊 Résultats du mois : {MOIS_OPTIONS[mois_cle]}")
         cols = st.columns(len(scores_totaux))
         for idx, (joueur, total) in enumerate(scores_totaux.items()):
             with cols[idx]:

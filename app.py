@@ -137,7 +137,7 @@ if fichier_importe is not None and current_repo:
             else:
                 current_repo.create_file(path=FILE_PATH, message="Creation par importation alignee", content=contenu_imp)
                 
-            st.success(f"✅ Le tableau de {MOIS_OPTIONS[mois_cle]} a été complété avec succès !")
+            st.success("✅ Le tableau de {MOIS_OPTIONS[mois_cle]} a été complété avec succès !")
             st.cache_data.clear()
             st.rerun()
         except Exception as e:
@@ -224,7 +224,6 @@ if df_mois is not None and not df_mois.empty:
         st.subheader("📊 Scores Totaux en Cours (Tout le monde)")
         cols_scores = st.columns(len(tous_les_scores))
         
-        # Affichage linéaire et sécurisé sans variables tampons conflictuelles
         for i, (joueur, (total, jours)) in enumerate(tous_les_scores.items()):
             with cols_scores[i]:
                 txt_j = f"{jours}/{total_jours_ouvres}j"
@@ -239,4 +238,9 @@ if df_mois is not None and not df_mois.empty:
         
         if len(classement_trie) > 0:
             pod1, pod2, pod3 = st.columns(3)
+            
+            # Extraction propre et sécurisée par index
             if len(classement_trie) >= 1:
+                p1_name = classement_trie[0][0]
+                p1_score = classement_trie[0][1][0]
+                p1_j = classement_trie[0][1][1]

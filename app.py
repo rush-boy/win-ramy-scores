@@ -149,27 +149,29 @@ if not df_mois.empty:
             except Exception as error:
                 st.error(f"Erreur lors de la sauvegarde : {error}")
 
-    # --- SECTION CALCUL + FILTRE 50% PARTICIPATION ---
+    # --- SECTION CALCUL + CLASSEMENT SÉPARÉ ---
     st.markdown("---")
-    if st.button("🔄 Calculer les totaux et afficher le classement"):
+    if st.button("🔄 Calculer les scores du mois", type="secondary"):
         SCORE_MAP = {'/': 0.5, 'x': 2.0, 'msk': -1.0}
         
         scores_qualifies = {}
         scores_disqualifies = {}
+        tous_les_scores = {}
         
         total_jours_ouvres = len(edited_df)
         seuil_minimum = total_jours_ouvres / 2
         
         st.sidebar.markdown("### 📊 Seuil de présence")
         st.sidebar.write(f"Nombre de jours ce mois : **{total_jours_ouvres}**")
-        st.sidebar.write(f"Minimum requis pour le classement : **{seuil_minimum:.1f}** jours joués.")
+        st.sidebar.write(f"Minimum requis pour le classement : **{seuil_minimum:.1f}** jours.")
         
+        # Phase 1 : Calcul global pour absolument tout le monde
         for joueur in edited_df.columns:
             total = 0.0
             valeurs = edited_df[joueur].astype(str).str.strip().str.lower()
             valeurs = valeurs.replace(['msr', 'mok', 'nsk', 'none', 'nan'], 'msk')
             
-            # Compter combien de fois le joueur a joué (toutes cases non vides)
+            # Compter la présence active
             jours_joues = valeurs.apply(lambda x: x in ['/', 'x', 'msk']).sum()
             
             # Calcul des points
@@ -180,54 +182,52 @@ if not df_mois.empty:
                     count = (valeurs == symbole).sum()
                 total += count * points
             
-            # Vérification de la règle des 50% de participation
+            tous_les_scores[joueur] = (total, jours_joues)
+            
+            # Séparation pour les podiums futurs
             if jours_joues >= seuil_minimum:
                 scores_qualifies[joueur] = (total, jours_joues)
             else:
                 scores_disqualifies[joueur] = (total, jours_joues)
-            
-        # Trier les qualifiés par score décroissant
-        classement_trie = sorted(scores_qualifies.items(), key=lambda item: item[1][0], reverse=True)
         
-        # 1. Affichage du TOP 3 (Le Podium des Qualifiés uniquement)
-        st.subheader(f"🏆 Le Podium de {MOIS_OPTIONS[mois_cle]} (Joueurs Qualifiés ≥ 50% du mois)")
+        # --- ETAPE 1 : AFFICHAGE DES SCORES EN COURS POUR TOUS ---
+        st.subheader("📊 Scores Totaux en Cours (Tout le monde)")
+        cols = st.columns(len(tous_les_scores))
+        for idx, (joueur, (total, jours)) in enumerate(tous_les_scores.items()):
+            with cols[idx]:
+                # Alerte visuelle si pas encore qualifié
+                statut_text = f"{jours}/{total_jours_ouvres}j"
+                if jours < seuil_minimum:
+                    st.metric(label=f"{joueur} ⚠️", value=f"{total} pts", delta=f"Incomplet ({statut_text})", delta_color="inverse")
+                else:
+                    if total > 0:
+                        st.metric(label=joueur, value=f"{total} pts", delta=f"Qualifié ({statut_text})")
+                    else:
+                        st.metric(label=joueur, value=f"{total} pts", delta=f"Qualifié ({statut_text})", delta_color="off")
+
+        # --- ETAPE 2 : LE PODIUM DES QUALIFIÉS ---
+        st.markdown("---")
+        st.subheader(f"🏆 Le Podium Officiel de {MOIS_OPTIONS[mois_cle]} (≥ 50% du mois)")
+        
+        classement_trie = sorted(scores_qualifies.items(), key=lambda item: item[1][0], reverse=True)
         
         if len(classement_trie) > 0:
             pod1, pod2, pod3 = st.columns(3)
-            
             if len(classement_trie) >= 1:
                 with pod1:
                     st.markdown(f"### 🥇 1ère Place")
-                    st.metric(label=classement_trie[0][0], value=f"{classement_trie[0][1][0]} pts", delta=f"{classement_trie[0][1][1]}j joués")
+                    st.metric(label=classement_trie[0][0], value=f"{classement_trie[0][1][0]} pts")
             if len(classement_trie) >= 2:
                 with pod2:
                     st.markdown(f"### 🥈 2ème Place")
-                    st.metric(label=classement_trie[1][0], value=f"{classement_trie[1][1][0]} pts", delta=f"{classement_trie[1][1][1]}j joués")
+                    st.metric(label=classement_trie[1][0], value=f"{classement_trie[1][1][0]} pts")
             if len(classement_trie) >= 3:
                 with pod3:
                     st.markdown(f"### 🥉 3ème Place")
-                    st.metric(label=classement_trie[2][0], value=f"{classement_trie[2][1][0]} pts", delta=f"{classement_trie[2][1][1]}j joués")
+                    st.metric(label=classement_trie[2][0], value=f"{classement_trie[2][1][0]} pts")
         else:
-            st.info("Aucun joueur n'a atteint le seuil minimum de participation pour être classé ce mois-ci.")
+            st.info("Aucun joueur n'est encore qualifié pour le podium (en attente du seuil de 50%).")
                 
-        # 2. Affichage du classement général complet
+        # --- ETAPE 3 : CLASSEMENT OFFICIEL VS EN ATTENTE ---
         st.markdown("---")
-        st.subheader("📊 Classement Général Complet")
-        
-        if len(classement_trie) > 0:
-            donnees_classement = []
-            for rang, (joueur, (score, jours)) in enumerate(classement_trie, start=1):
-                if rang == 1: icone = "🥇"
-                elif rang == 2: icone = "🥈"
-                elif rang == 3: icone = "🥉"
-                elif rang == len(classement_trie): icone = "💀 (Miskine)"
-                else: icone = "👤"
-                
-                donnees_classement.append({
-                    "Rang": rang,
-                    "Statut": icone,
-                    "Joueur": joueur,
-                    "Score Total": f"{score} pts",
-                    "Jours Actifs": f"{jours} / {total_jours_ouvres}"
-                })
-            df_classement = pd.DataFrame(donnees_classement)
+        st.subheader("📋 Classement Général des Qualifiés")

@@ -83,7 +83,7 @@ def charger_donnees_mensuelles(file_name):
 
 current_repo, file_sha, df_mois = charger_donnees_mensuelles(FILE_PATH)
 
-# --- ZONE D'IMPORTATION ---
+# --- ZONE D'IMPORTATION CORRIGÉE ---
 st.markdown("### 📥 Importer un fichier de scores fourni par l'IA")
 fichier_importe = st.file_uploader(f"Glissez ici le fichier CSV pour {MOIS_OPTIONS[mois_cle]} {annee_actuelle}", type=["csv"])
 
@@ -97,8 +97,16 @@ if fichier_importe is not None and current_repo:
             df_imp.to_csv(csv_buffer)
             contenu_imp = csv_buffer.getvalue()
             
-            if file_sha:
-                current_repo.update_file(path=FILE_PATH, message="Importation de fichier sécurisée", content=contenu_imp, sha=file_sha)
+            # CORRECTION DU BUG 422 : Récupérer le SHA frais du fichier s'il existe déjà sur GitHub avant de l'écraser
+            sha_actuel = None
+            try:
+                fichier_existant = current_repo.get_contents(FILE_PATH)
+                sha_actuel = fichier_existant.sha
+            except Exception:
+                pass # Le fichier n'existe pas encore, sha reste à None
+            
+            if sha_actuel:
+                current_repo.update_file(path=FILE_PATH, message="Importation et écrasement sécurisé", content=contenu_imp, sha=sha_actuel)
             else:
                 current_repo.create_file(path=FILE_PATH, message="Création par importation sécurisée", content=contenu_imp)
                 
@@ -141,14 +149,21 @@ if not df_mois.empty:
     if st.button(f"💾 Enregistrer les modifications", type="primary"):
         if current_repo:
             try:
+                # Récupérer le SHA le plus récent pour la sauvegarde manuelle également
+                try:
+                    fichier_existant = current_repo.get_contents(FILE_PATH)
+                    sha_maj = fichier_existant.sha
+                except Exception:
+                    sha_maj = file_sha
+
                 df_sauvegarde = edited_df.copy()
                 for col in df_sauvegarde.columns:
                     df_sauvegarde[col] = df_sauvegarde[col].astype(str).str.replace('None', '').str.replace('nan', '')
                 csv_buffer = io.StringIO()
                 df_sauvegarde.to_csv(csv_buffer)
                 
-                if file_sha:
-                    current_repo.update_file(path=FILE_PATH, message="Mise à jour manuelle", content=csv_buffer.getvalue(), sha=file_sha)
+                if sha_maj:
+                    current_repo.update_file(path=FILE_PATH, message="Mise à jour manuelle", content=csv_buffer.getvalue(), sha=sha_maj)
                 else:
                     current_repo.create_file(path=FILE_PATH, message="Création manuelle", content=csv_buffer.getvalue())
                 st.success("✅ Enregistré !")
@@ -203,18 +218,5 @@ if not df_mois.empty:
         if len(classement_trie) > 0:
             pod1, pod2, pod3 = st.columns(3)
             if len(classement_trie) >= 1:
-                p1_name, (p1_score, p1_j) = classement_trie
+                p1_name, (p1_score, p1_j) = classement_trie[0]
                 pod1.metric(label=f"🥇 1ère Place : {p1_name}", value=f"{p1_score} pts", delta=f"{p1_j} jours")
-            if len(classement_trie) >= 2:
-                p2_name, (p2_score, p2_j) = classement_trie
-                pod2.metric(label=f"🥈 2ème Place : {p2_name}", value=f"{p2_score} pts", delta=f"{p2_j} jours")
-            if len(classement_trie) >= 3:
-                p3_name, (p3_score, p3_j) = classement_trie
-                pod3.metric(label=f"🥉 3ème Place : {p3_name}", value=f"{p3_score} pts", delta=f"{p3_j} jours")
-        else:
-            st.info("Aucun joueur qualifié pour le moment.")
-                
-        st.markdown("---")
-        st.subheader("📋 Classement Général des Qualifiés")
-        if len(classement_trie) > 0:
-            donnees_classement = []

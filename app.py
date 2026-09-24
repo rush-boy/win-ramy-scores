@@ -91,7 +91,7 @@ def charger_donnees_mensuelles(file_name):
 
 current_repo, file_sha, df_mois = charger_donnees_mensuelles(FILE_PATH)
 
-# --- ZONE D'IMPORTATION FORCEE ---
+# --- ZONE D'IMPORTATION ---
 st.markdown("### 📥 Importer un fichier de scores fourni par l'IA")
 fichier_importe = st.file_uploader(f"Glissez ici le fichier CSV pour {MOIS_OPTIONS[mois_cle]} {annee_actuelle}", type=["csv"])
 
@@ -101,20 +101,14 @@ if fichier_importe is not None and current_repo:
             bytes_data = fichier_importe.read()
             texte_decode = bytes_data.decode("utf-8-sig", errors="ignore")
             
-            # Charger le fichier de l'IA en ignorant les noms de lignes d'origine
             df_imp = pd.read_csv(io.StringIO(texte_decode), index_col=0)
-            
-            # Créer un tableau tout neuf parfaitement adapté au mois en cours
             df_final = generer_tableau_vierge()
             
-            # Injecter les colonnes correspondantes
             for col in df_final.columns:
                 if col in df_imp.columns:
-                    # Copier les valeurs reçues ligne par ligne
                     for i in range(min(len(df_final), len(df_imp))):
                         df_final.iloc[i, df_final.columns.get_loc(col)] = str(df_imp.iloc[i, df_imp.columns.get_loc(col)])
             
-            # Nettoyage final des valeurs invalides
             for j in df_final.columns:
                 df_final[j] = df_final[j].fillna('').astype(str).str.replace('None', '').str.replace('nan', '')
             
@@ -147,7 +141,6 @@ if df_mois is not None and not df_mois.empty:
     
     df_mois.index.name = "DATE"
     
-    # Sécurité pour s'assurer que l'index a toujours les bonnes dates
     if list(df_mois.index) != dates_semaine_attendues:
         df_mois = generer_tableau_vierge()
 
@@ -238,3 +231,10 @@ if df_mois is not None and not df_mois.empty:
                 p1_name, (p1_score, p1_j) = classement_trie[0]
                 pod1.metric(label=f"🥇 1er : {p1_name}", value=f"{p1_score} pts", delta=f"{p1_j} jours")
             if len(classement_trie) >= 2:
+                p2_name, (p2_score, p2_j) = classement_trie[1]
+                pod2.metric(label=f"🥈 2e : {p2_name}", value=f"{p2_score} pts", delta=f"{p2_j} jours")
+            if len(classement_trie) >= 3:
+                p3_name, (p3_score, p3_j) = classement_trie[2]
+                pod3.metric(label=f"🥉 3e : {p3_name}", value=f"{p3_score} pts", delta=f"{p3_j} jours")
+        else:
+            st.info("Aucun joueur qualifié pour le moment.")

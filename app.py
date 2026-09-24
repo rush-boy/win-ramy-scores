@@ -41,6 +41,11 @@ st.sidebar.info(f"📂 Fichier actif : `{FILE_PATH}`")
 # Liste officielle des joueurs
 liste_joueurs = ['MR', 'MT', 'Kathaï', 'Sissy', 'Maxou', 'Seb', 'Stéphanou', 'Mickaël', 'Céline']
 
+# Fonction pour vérifier si une ligne de texte correspond à un week-end (Sam ou Dim)
+def est_un_weekend(index_text):
+    text = str(index_text).lower()
+    return "sam" in text or "dim" in text
+
 # --- FONCTION DE CHARGEMENT DES DONNÉES ---
 @st.cache_data(ttl=5)
 def charger_donnees_mensuelles(file_name):
@@ -49,29 +54,29 @@ def charger_donnees_mensuelles(file_name):
             file_content = repo.get_contents(file_name)
             csv_data = file_content.decoded_content.decode('utf-8')
             df = pd.read_csv(io.StringIO(csv_data), index_col=0)
+            
+            # Nettoyage et forçage du format texte
             for j in df.columns:
-                df[j] = df[j].fillna('').astype(str)
+                df[j] = df[j].fillna('').astype(str).str.replace('None', '').str.replace('nan', '')
+            
+            # --- CORRECTION : Nettoyage en temps réel des week-ends présents dans le fichier historique ---
+            lignes_a_garder = [not est_un_weekend(ind) for ind in df.index]
+            df = df[lignes_a_garder]
+            
             return repo, file_content.sha, df
         except Exception:
-            # --- MODIFICATION : EXCLUSION DES WEEK-ENDS ---
-            # 1. Définir le premier et le dernier jour du mois sélectionné
+            # Génération d'un nouveau mois vierge sans week-ends
             debut_mois = f"{annee_actuelle}-{mois_cle}-01"
-            # Trouver le dernier jour du mois en passant au mois suivant puis en retirant 1 jour
             if mois_cle == "12":
                 fin_mois = f"{annee_actuelle}-12-31"
             else:
                 prochain_mois = f"{int(mois_cle)+1:02d}"
                 fin_mois = (pd.to_datetime(f"{annee_actuelle}-{prochain_mois}-01") - pd.Timedelta(days=1)).strftime('%Y-%m-%d')
             
-            # 2. Générer uniquement les jours de la semaine (Lundi au Vendredi)
             jours_ouvres = pd.bdate_range(start=debut_mois, end=fin_mois)
-            
-            # 3. Formater les dates en "JJ/MM" ou "Lun 01/09" pour coller au style de votre feuille d'origine
-            # Table de correspondance pour les jours en français
             jours_fr = {0: "Lun", 1: "Mar", 2: "Mer", 3: "Jeu", 4: "Ven"}
             dates_formatees = [f"{jours_fr[d.dayofweek]} {d.strftime('%d/%m')}" for d in jours_ouvres]
             
-            # 4. Initialisation de la structure avec les jours filtrés
             init_data = {j: [''] * len(dates_formatees) for j in liste_joueurs}
             init_data['DATE'] = dates_formatees
             df_vierge = pd.DataFrame(init_data).set_index('DATE')
@@ -81,10 +86,10 @@ def charger_donnees_mensuelles(file_name):
 current_repo, file_sha, df_mois = charger_donnees_mensuelles(FILE_PATH)
 
 if not df_mois.empty:
-    st.subheader(f"📝 Tableau de {MOIS_OPTIONS[mois_cle]} {annee_actuelle} (Sans les week-ends)")
+    st.subheader(f"📝 Tableau de {MOIS_OPTIONS[mois_cle]} {annee_actuelle} (Week-ends masqués)")
     
     if file_sha is None:
-        st.warning(f"ℹ️ Aucun historique trouvé pour ce mois. Un nouveau tableau vierge (du lundi au vendredi) a été généré.")
+        st.warning(f"ℹ️ Aucun historique trouvé pour ce mois. Un nouveau tableau sans les week-ends a été généré.")
 
     # Configuration pour bloquer les zéros et forcer le texte
     configuration_colonnes = {
@@ -114,7 +119,7 @@ if not df_mois.empty:
                 if file_sha:
                     current_repo.update_file(
                         path=FILE_PATH,
-                        message=f"Mise à jour des scores pour {MOIS_OPTIONS[mois_cle]} {annee_actuelle}",
+                        message=f"Mise à jour des scores (sans week-end) pour {MOIS_OPTIONS[mois_cle]} {annee_actuelle}",
                         content=nouveau_contenu,
                         sha=file_sha
                     )
@@ -125,7 +130,7 @@ if not df_mois.empty:
                         content=nouveau_contenu
                     )
                 
-                st.success(f"✅ Historique de {MOIS_OPTIONS[mois_cle]} enregistré avec succès !")
+                st.success(f"✅ Historique de {MOIS_OPTIONS[mois_cle]} mis à jour et enregistré !")
                 st.cache_data.clear()
             except Exception as error:
                 st.error(f"Erreur lors de la sauvegarde : {error}")

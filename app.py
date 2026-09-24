@@ -149,7 +149,7 @@ if not df_mois.empty:
             except Exception as error:
                 st.error(f"Erreur lors de la sauvegarde : {error}")
 
-    # --- REORGANISATION DU CALCUL ET DU PODIUM ---
+    # --- CALCUL ET PODIUM TRAITÉS SANS ERREUR ---
     st.markdown("---")
     if st.button("🔄 Calculer les totaux et afficher le classement"):
         SCORE_MAP = {'/': 0.5, 'x': 2.0, 'msk': -1.0}
@@ -158,7 +158,8 @@ if not df_mois.empty:
         for joueur in edited_df.columns:
             total = 0.0
             valeurs = edited_df[joueur].astype(str).str.strip().str.lower()
-            valeurs = valeur_nettoyee := valeurs.replace(['msr', 'mok', 'nsk', 'none', 'nan'], 'msk')
+            # Séparation de la ligne problématique en une syntaxe classique universelle
+            valeurs = valeurs.replace(['msr', 'mok', 'nsk', 'none', 'nan'], 'msk')
             
             for symbole, points in SCORE_MAP.items():
                 if symbole == '/':
@@ -168,20 +169,18 @@ if not df_mois.empty:
                 total += count * points
             scores_totaux[joueur] = total
             
-        # Trier les joueurs par score décroissant pour faire le classement
+        # Trier les joueurs par score décroissant
         classement_trie = sorted(scores_totaux.items(), key=lambda item: item[1], reverse=True)
         
         # 1. Affichage du TOP 3 (Le Podium)
         st.subheader(f"🏆 Le Podium de {MOIS_OPTIONS[mois_cle]}")
         
-        # Création de 3 colonnes pour afficher le podium de manière visuelle (1er au centre ou à gauche)
         pod1, pod2, pod3 = st.columns(3)
         
-        # Attribution des médailles selon le nombre de joueurs disponibles
         if len(classement_trie) >= 1:
             with pod1:
                 st.markdown(f"### 🥇 1ère Place")
-                st.metric(label=classement_trie[0][0], value=f"{classement_trie[0][1]} pts", delta="Génie")
+                st.metric(label=classement_trie[0][0], value=f"{classement_trie[0][1]} pts", delta="🔥")
         if len(classement_trie) >= 2:
             with pod2:
                 st.markdown(f"### 🥈 2ème Place")
@@ -191,13 +190,12 @@ if not df_mois.empty:
                 st.markdown(f"### 🥉 3ème Place")
                 st.metric(label=classement_trie[2][0], value=f"{classement_trie[2][1]} pts")
                 
-        # 2. Affichage du classement complet (du 1er au dernier sous forme de tableau propre)
+        # 2. Affichage du classement général complet
         st.markdown("---")
         st.subheader("📊 Classement Général Complet")
         
         donnees_classement = []
         for rang, (joueur, score) in enumerate(classement_trie, start=1):
-            # Ajout d'une petite icône selon le rang
             if rang == 1: icone = "🥇"
             elif rang == 2: icone = "🥈"
             elif rang == 3: icone = "🥉"
@@ -212,5 +210,4 @@ if not df_mois.empty:
             })
             
         df_classement = pd.DataFrame(donnees_classement)
-        # Affichage du classement général sans les index de ligne moches
         st.dataframe(df_classement.set_index("Rang"), use_container_width=True)

@@ -91,7 +91,7 @@ def charger_donnees_mensuelles(file_name):
 
 current_repo, file_sha, df_mois = charger_donnees_mensuelles(FILE_PATH)
 
-# --- ZONE D'IMPORTATION DIRECTE ET ROBUSTE ---
+# --- ZONE D'IMPORTATION ---
 st.markdown("### 📥 Importer un fichier de scores fourni par l'IA")
 fichier_importe = st.file_uploader(f"Glissez ici le fichier CSV pour {MOIS_OPTIONS[mois_cle]} {annee_actuelle}", type=["csv"])
 
@@ -101,20 +101,14 @@ if fichier_importe is not None and current_repo:
             bytes_data = fichier_importe.read()
             texte_decode = bytes_data.decode("utf-8-sig", errors="ignore")
             
-            # On charge le fichier SANS donner de colonne d'index pour ne pas être bloqué par le nom "DATE"
             df_imp = pd.read_csv(io.StringIO(texte_decode))
             
-            # Si la première colonne contient du texte comme "Mar 01/09", on la supprime pour ne garder que les joueurs
-            if "mar" in str(df_imp.iloc[0, 0]).lower() or "lun" in str(df_imp.iloc[0, 0]).lower() or "/" in str(df_imp.iloc[0, 0]):
+            if "mar" in str(df_imp.iloc).lower() or "lun" in str(df_imp.iloc).lower() or "/" in str(df_imp.iloc):
                 df_imp = df_imp.iloc[:, 1:]
             
-            # Créer un tableau vierge officiel tout neuf pour le mois actif
             df_final = generer_tableau_vierge()
             
-            # Injecter les scores des joueurs ligne par ligne, sans se soucier des dates d'origine
-            compteur_colonne_inseree = 0
             for joueur in liste_joueurs:
-                # Trouver la colonne dans le fichier importé (parfois sensible aux majuscules/minuscules)
                 colonne_trouvee = None
                 for c_imp in df_imp.columns:
                     if str(c_imp).strip().lower() == joueur.lower():
@@ -122,34 +116,30 @@ if fichier_importe is not None and current_repo:
                         break
                 
                 if colonne_trouvee is not None:
-                    compteur_colonne_inseree += 1
                     for i in range(min(len(df_final), len(df_imp))):
                         valeur_brute = str(df_imp.loc[i, colonne_trouvee]).strip()
                         if valeur_brute.lower() in ['none', 'nan', 'null']:
                             valeur_brute = ''
                         df_final.iloc[i, df_final.columns.get_loc(joueur)] = valeur_brute
 
-            if compteur_colonne_inseree == 0:
-                st.error("⚠️ Le fichier importé ne contient aucun nom de joueur correspondant à votre équipe.")
+            csv_buffer = io.StringIO()
+            df_final.to_csv(csv_buffer)
+            contenu_imp = csv_buffer.getvalue()
+            
+            try:
+                fichier_existant = current_repo.get_contents(FILE_PATH)
+                sha_actuel = fichier_existant.sha
+            except Exception:
+                sha_actuel = None
+            
+            if sha_actuel:
+                current_repo.update_file(path=FILE_PATH, message="Importation alignee reussie", content=contenu_imp, sha=sha_actuel)
             else:
-                csv_buffer = io.StringIO()
-                df_final.to_csv(csv_buffer)
-                contenu_imp = csv_buffer.getvalue()
+                current_repo.create_file(path=FILE_PATH, message="Creation par importation alignee", content=contenu_imp)
                 
-                try:
-                    fichier_existant = current_repo.get_contents(FILE_PATH)
-                    sha_actuel = fichier_existant.sha
-                except Exception:
-                    sha_actuel = None
-                
-                if sha_actuel:
-                    current_repo.update_file(path=FILE_PATH, message="Importation alignee reussie", content=contenu_imp, sha=sha_actuel)
-                else:
-                    current_repo.create_file(path=FILE_PATH, message="Creation par importation alignee", content=contenu_imp)
-                    
-                st.success(f"✅ Le tableau de {MOIS_OPTIONS[mois_cle]} a été complété avec succès ({compteur_colonne_inseree} joueurs synchronisés) !")
-                st.cache_data.clear()
-                st.rerun()
+            st.success(f"✅ Le tableau de {MOIS_OPTIONS[mois_cle]} a été complété avec succès !")
+            st.cache_data.clear()
+            st.rerun()
         except Exception as e:
             st.error(f"Erreur lors de l'importation : {e}")
 
@@ -232,6 +222,21 @@ if df_mois is not None and not df_mois.empty:
                 scores_disqualifies[joueur] = (total, jours_joues)
         
         st.subheader("📊 Scores Totaux en Cours (Tout le monde)")
-        cols = st.columns(len(tous_les_scores))
-        for idx, (joueur, (total, jours)) in enumerate(tous_les_scores.items()):
-            with cols[idx]:
+        cols_scores = st.columns(len(tous_les_scores))
+        
+        # Affichage linéaire et sécurisé sans variables tampons conflictuelles
+        for i, (joueur, (total, jours)) in enumerate(tous_les_scores.items()):
+            with cols_scores[i]:
+                txt_j = f"{jours}/{total_jours_ouvres}j"
+                if jours < seuil_minimum:
+                    st.metric(label=f"{joueur} ⚠️", value=f"{total} pts", delta=f"Incomplet ({txt_j})", delta_color="inverse")
+                else:
+                    st.metric(label=joueur, value=f"{total} pts", delta=f"Qualifié ({txt_j})", delta_color="normal" if total > 0 else "off")
+
+        st.markdown("---")
+        st.subheader("🏆 Le Podium Officiel (≥ 50% du mois)")
+        classement_trie = sorted(scores_qualifies.items(), key=lambda item: item[1][0], reverse=True)
+        
+        if len(classement_trie) > 0:
+            pod1, pod2, pod3 = st.columns(3)
+            if len(classement_trie) >= 1:

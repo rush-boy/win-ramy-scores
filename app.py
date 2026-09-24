@@ -70,7 +70,6 @@ def charger_donnees_mensuelles(file_name):
             
             return repo, file_content.sha, df
         except Exception:
-            # Génération d'un nouveau mois vierge si inexistant
             init_data = {j: [''] * len(dates_semaine_attendues) for j in liste_joueurs}
             init_data['DATE'] = dates_semaine_attendues
             df_vierge = pd.DataFrame(init_data).set_index('DATE')
@@ -82,22 +81,15 @@ current_repo, file_sha, df_mois = charger_donnees_mensuelles(FILE_PATH)
 if not df_mois.empty:
     st.subheader(f"📝 Tableau de {MOIS_OPTIONS[mois_cle]} {annee_actuelle}")
     
-    # --- BOUTON DE FORÇAGE DES DATES DU LUNDI AU VENDREDI ---
-    # Si le nombre de lignes ou les noms de lignes ne correspondent pas aux jours ouvrés
     besoin_mise_a_niveau = list(df_mois.index) != dates_semaine_attendues
-    
     if besoin_mise_a_niveau:
         st.warning("⚙️ Le format des dates de ce mois a besoin d'être synchronisé du Lundi au Vendredi.")
         if st.button("🔧 Appliquer le calendrier de la semaine (Conserve vos données)", type="secondary"):
-            # On crée un nouveau tableau vierge avec les bonnes dates
             df_aligne = pd.DataFrame(index=dates_semaine_attendues, columns=liste_joueurs).fillna('')
-            
-            # On recopie les anciennes données ligne par ligne (dans la limite des places disponibles)
             for i, (idx_ancien, row) in enumerate(df_mois.iterrows()):
                 if i < len(dates_semaine_attendues):
                     date_cible = dates_semaine_attendues[i]
                     df_aligne.loc[date_cible] = row
-            
             try:
                 csv_buffer = io.StringIO()
                 df_aligne.to_csv(csv_buffer)
@@ -114,13 +106,11 @@ if not df_mois.empty:
             except Exception as e:
                 st.error(f"Erreur lors de la mise à niveau : {e}")
 
-    # Configuration des colonnes
     configuration_colonnes = {
         joueur: st.column_config.TextColumn(label=joueur, default="") 
         for joueur in df_mois.columns
     }
 
-    # Éditeur interactif
     widget_key = f"editor_{mois_cle}_{annee_actuelle}_{len(df_mois)}"
     edited_df = st.data_editor(
         df_mois, 
@@ -129,7 +119,6 @@ if not df_mois.empty:
         key=widget_key
     )
 
-    # Bouton de sauvegarde
     if st.button(f"💾 Enregistrer les modifications", type="primary"):
         if current_repo:
             try:
@@ -160,16 +149,16 @@ if not df_mois.empty:
             except Exception as error:
                 st.error(f"Erreur lors de la sauvegarde : {error}")
 
-    # Section Calcul des scores
+    # --- REORGANISATION DU CALCUL ET DU PODIUM ---
     st.markdown("---")
-    if st.button("🔄 Calculer les totaux du mois sélectionné"):
+    if st.button("🔄 Calculer les totaux et afficher le classement"):
         SCORE_MAP = {'/': 0.5, 'x': 2.0, 'msk': -1.0}
         scores_totaux = {}
         
         for joueur in edited_df.columns:
             total = 0.0
             valeurs = edited_df[joueur].astype(str).str.strip().str.lower()
-            valeurs = valeurs.replace(['msr', 'mok', 'nsk', 'none', 'nan'], 'msk')
+            valeurs = valeur_nettoyee := valeurs.replace(['msr', 'mok', 'nsk', 'none', 'nan'], 'msk')
             
             for symbole, points in SCORE_MAP.items():
                 if symbole == '/':
@@ -179,13 +168,49 @@ if not df_mois.empty:
                 total += count * points
             scores_totaux[joueur] = total
             
-        st.subheader(f"📊 Résultats du mois : {MOIS_OPTIONS[mois_cle]}")
-        cols = st.columns(len(scores_totaux))
-        for idx, (joueur, total) in enumerate(scores_totaux.items()):
-            with cols[idx]:
-                if total > 0:
-                    st.metric(label=joueur, value=f"{total} pts", delta="🔥")
-                elif total < 0:
-                    st.metric(label=joueur, value=f"{total} pts", delta="💀", delta_color="inverse")
-                else:
-                    st.metric(label=joueur, value=f"{total} pts")
+        # Trier les joueurs par score décroissant pour faire le classement
+        classement_trie = sorted(scores_totaux.items(), key=lambda item: item[1], reverse=True)
+        
+        # 1. Affichage du TOP 3 (Le Podium)
+        st.subheader(f"🏆 Le Podium de {MOIS_OPTIONS[mois_cle]}")
+        
+        # Création de 3 colonnes pour afficher le podium de manière visuelle (1er au centre ou à gauche)
+        pod1, pod2, pod3 = st.columns(3)
+        
+        # Attribution des médailles selon le nombre de joueurs disponibles
+        if len(classement_trie) >= 1:
+            with pod1:
+                st.markdown(f"### 🥇 1ère Place")
+                st.metric(label=classement_trie[0][0], value=f"{classement_trie[0][1]} pts", delta="Génie")
+        if len(classement_trie) >= 2:
+            with pod2:
+                st.markdown(f"### 🥈 2ème Place")
+                st.metric(label=classement_trie[1][0], value=f"{classement_trie[1][1]} pts")
+        if len(classement_trie) >= 3:
+            with pod3:
+                st.markdown(f"### 🥉 3ème Place")
+                st.metric(label=classement_trie[2][0], value=f"{classement_trie[2][1]} pts")
+                
+        # 2. Affichage du classement complet (du 1er au dernier sous forme de tableau propre)
+        st.markdown("---")
+        st.subheader("📊 Classement Général Complet")
+        
+        donnees_classement = []
+        for rang, (joueur, score) in enumerate(classement_trie, start=1):
+            # Ajout d'une petite icône selon le rang
+            if rang == 1: icone = "🥇"
+            elif rang == 2: icone = "🥈"
+            elif rang == 3: icone = "🥉"
+            elif rang == len(classement_trie): icone = "💀 (Miskine)"
+            else: icone = "👤"
+            
+            donnees_classement.append({
+                "Rang": rang,
+                "Statut": icone,
+                "Joueur": joueur,
+                "Score Total": f"{score} pts"
+            })
+            
+        df_classement = pd.DataFrame(donnees_classement)
+        # Affichage du classement général sans les index de ligne moches
+        st.dataframe(df_classement.set_index("Rang"), use_container_width=True)

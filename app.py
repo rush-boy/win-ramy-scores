@@ -38,6 +38,11 @@ mois_cle = st.sidebar.selectbox(
 FILE_PATH = f"scores_{mois_cle}_{annee_actuelle}.csv"
 st.sidebar.info(f"📂 Fichier actif : `{FILE_PATH}`")
 
+# Bouton d'urgence pour vider le cache en cas de blocage visuel
+if st.sidebar.button("🔄 Forcer la synchronisation (Vider le cache)"):
+    st.cache_data.clear()
+    st.rerun()
+
 # Liste officielle des joueurs
 liste_joueurs = ['MR', 'MT', 'Kathaï', 'Sissy', 'Maxou', 'Seb', 'Stéphanou', 'Mickaël', 'Céline']
 
@@ -78,6 +83,31 @@ def charger_donnees_mensuelles(file_name):
 
 current_repo, file_sha, df_mois = charger_donnees_mensuelles(FILE_PATH)
 
+# --- ZONE D'IMPORTATION DIRECTE DE FICHIER CSV ---
+st.markdown("### 📥 Importer un fichier de scores fourni par l'IA")
+fichier_importe = st.file_uploader(f"Glissez ici le fichier CSV pour {MOIS_OPTIONS[mois_cle]} {annee_actuelle}", type=["csv"])
+
+if fichier_importe is not None and current_repo:
+    if st.button("🚀 Valider l'importation et écraser le tableau actuel", type="secondary"):
+        try:
+            df_imp = pd.read_csv(fichier_importe, index_col=0)
+            csv_buffer = io.StringIO()
+            df_imp.to_csv(csv_buffer)
+            contenu_imp = csv_buffer.getvalue()
+            
+            if file_sha:
+                current_repo.update_file(path=FILE_PATH, message="Importation de fichier", content=contenu_imp, sha=file_sha)
+            else:
+                current_repo.create_file(path=FILE_PATH, message="Création par importation", content=contenu_imp)
+                
+            st.success("✅ Fichier importé avec succès ! Rechargement...")
+            st.cache_data.clear()
+            st.rerun()
+        except Exception as e:
+            st.error(f"Erreur lors de l'importation : {e}")
+
+st.markdown("---")
+
 if not df_mois.empty:
     st.subheader(f"📝 Tableau de {MOIS_OPTIONS[mois_cle]} {annee_actuelle}")
     
@@ -94,30 +124,17 @@ if not df_mois.empty:
                 csv_buffer = io.StringIO()
                 df_aligne.to_csv(csv_buffer)
                 if file_sha:
-                    current_repo.update_file(
-                        path=FILE_PATH,
-                        message="Forçage du calendrier Lundi-Vendredi",
-                        content=csv_buffer.getvalue(),
-                        sha=file_sha
-                    )
-                    st.success("⚡ Calendrier mis à jour ! Rechargement de la page...")
+                    current_repo.update_file(path=FILE_PATH, message="Forçage calendrier", content=csv_buffer.getvalue(), sha=file_sha)
+                    st.success("⚡ Calendrier mis à jour !")
                     st.cache_data.clear()
                     st.rerun()
             except Exception as e:
-                st.error(f"Erreur lors de la mise à niveau : {e}")
+                st.error(f"Erreur : {e}")
 
-    configuration_colonnes = {
-        joueur: st.column_config.TextColumn(label=joueur, default="") 
-        for joueur in df_mois.columns
-    }
-
+    configuration_colonnes = {joueur: st.column_config.TextColumn(label=joueur, default="") for joueur in df_mois.columns}
     widget_key = f"editor_{mois_cle}_{annee_actuelle}_{len(df_mois)}"
-    edited_df = st.data_editor(
-        df_mois, 
-        column_config=configuration_colonnes,
-        use_container_width=True,
-        key=widget_key
-    )
+    
+    edited_df = st.data_editor(df_mois, column_config=configuration_colonnes, use_container_width=True, key=widget_key)
 
     if st.button(f"💾 Enregistrer les modifications", type="primary"):
         if current_repo:
@@ -125,109 +142,68 @@ if not df_mois.empty:
                 df_sauvegarde = edited_df.copy()
                 for col in df_sauvegarde.columns:
                     df_sauvegarde[col] = df_sauvegarde[col].astype(str).str.replace('None', '').str.replace('nan', '')
-                
                 csv_buffer = io.StringIO()
                 df_sauvegarde.to_csv(csv_buffer)
                 
                 if file_sha:
-                    current_repo.update_file(
-                        path=FILE_PATH,
-                        message=f"Mise à jour des scores pour {MOIS_OPTIONS[mois_cle]}",
-                        content=csv_buffer.getvalue(),
-                        sha=file_sha
-                    )
+                    current_repo.update_file(path=FILE_PATH, message="Mise à jour manuelle", content=csv_buffer.getvalue(), sha=file_sha)
                 else:
-                    current_repo.create_file(
-                        path=FILE_PATH,
-                        message=f"Création du tableau pour {MOIS_OPTIONS[mois_cle]}",
-                        content=csv_buffer.getvalue()
-                    )
-                
-                st.success(f"✅ Enregistré !")
+                    current_repo.create_file(path=FILE_PATH, message="Création manuelle", content=csv_buffer.getvalue())
+                st.success("✅ Enregistré !")
                 st.cache_data.clear()
                 st.rerun()
             except Exception as error:
-                st.error(f"Erreur lors de la sauvegarde : {error}")
+                st.error(f"Erreur de sauvegarde : {error}")
 
-    # --- SECTION CALCUL + CLASSEMENT SÉPARÉ ---
+    # --- SECTION CALCUL ---
     st.markdown("---")
-    if st.button("🔄 Calculer les scores du mois", type="secondary"):
+    if st.button("🔄 Calculer les scores du mois"):
         SCORE_MAP = {'/': 0.5, 'x': 2.0, 'msk': -1.0}
-        
-        scores_qualifies = {}
-        scores_disqualifies = {}
-        tous_les_scores = {}
-        
+        scores_qualifies, scores_disqualifies, tous_les_scores = {}, {}, {}
         total_jours_ouvres = len(edited_df)
         seuil_minimum = total_jours_ouvres / 2
         
-        st.sidebar.markdown("### 📊 Seuil de présence")
-        st.sidebar.write(f"Nombre de jours ce mois : **{total_jours_ouvres}**")
-        st.sidebar.write(f"Minimum requis pour le classement : **{seuil_minimum:.1f}** jours.")
-        
-        # Phase 1 : Calcul global pour absolument tout le monde
         for joueur in edited_df.columns:
             total = 0.0
-            valeurs = edited_df[joueur].astype(str).str.strip().str.lower()
-            valeurs = valeurs.replace(['msr', 'mok', 'nsk', 'none', 'nan'], 'msk')
-            
-            # Compter la présence active
+            valeurs = edited_df[joueur].astype(str).str.strip().str.lower().replace(['msr', 'mok', 'nsk', 'none', 'nan'], 'msk')
             jours_joues = valeurs.apply(lambda x: x in ['/', 'x', 'msk']).sum()
             
-            # Calcul des points
             for symbole, points in SCORE_MAP.items():
-                if symbole == '/':
-                    count = valeurs.str.count(r'/').sum()
-                else:
-                    count = (valeurs == symbole).sum()
+                count = valeurs.str.count(r'/').sum() if symbole == '/' else (valeurs == symbole).sum()
                 total += count * points
             
             tous_les_scores[joueur] = (total, jours_joues)
-            
-            # Séparation pour les podiums futurs
             if jours_joues >= seuil_minimum:
                 scores_qualifies[joueur] = (total, jours_joues)
             else:
                 scores_disqualifies[joueur] = (total, jours_joues)
         
-        # --- ETAPE 1 : AFFICHAGE DES SCORES EN COURS POUR TOUS ---
         st.subheader("📊 Scores Totaux en Cours (Tout le monde)")
         cols = st.columns(len(tous_les_scores))
         for idx, (joueur, (total, jours)) in enumerate(tous_les_scores.items()):
             with cols[idx]:
-                # Alerte visuelle si pas encore qualifié
                 statut_text = f"{jours}/{total_jours_ouvres}j"
                 if jours < seuil_minimum:
                     st.metric(label=f"{joueur} ⚠️", value=f"{total} pts", delta=f"Incomplet ({statut_text})", delta_color="inverse")
                 else:
-                    if total > 0:
-                        st.metric(label=joueur, value=f"{total} pts", delta=f"Qualifié ({statut_text})")
-                    else:
-                        st.metric(label=joueur, value=f"{total} pts", delta=f"Qualifié ({statut_text})", delta_color="off")
+                    st.metric(label=joueur, value=f"{total} pts", delta=f"Qualifié ({statut_text})", delta_color="normal" if total > 0 else "off")
 
-        # --- ETAPE 2 : LE PODIUM DES QUALIFIÉS ---
         st.markdown("---")
-        st.subheader(f"🏆 Le Podium Officiel de {MOIS_OPTIONS[mois_cle]} (≥ 50% du mois)")
-        
+        st.subheader(f"🏆 Le Podium Officiel (≥ 50% du mois)")
         classement_trie = sorted(scores_qualifies.items(), key=lambda item: item[1][0], reverse=True)
         
         if len(classement_trie) > 0:
             pod1, pod2, pod3 = st.columns(3)
-            if len(classement_trie) >= 1:
-                with pod1:
-                    st.markdown(f"### 🥇 1ère Place")
-                    st.metric(label=classement_trie[0][0], value=f"{classement_trie[0][1][0]} pts")
-            if len(classement_trie) >= 2:
-                with pod2:
-                    st.markdown(f"### 🥈 2ème Place")
-                    st.metric(label=classement_trie[1][0], value=f"{classement_trie[1][1][0]} pts")
-            if len(classement_trie) >= 3:
-                with pod3:
-                    st.markdown(f"### 🥉 3ème Place")
-                    st.metric(label=classement_trie[2][0], value=f"{classement_trie[2][1][0]} pts")
+            if len(classement_trie) >= 1: pod1.metric(label="🥇 1ère Place", value=classement_trie[0][0], delta=f"{classement_trie[0][1][0]} pts")
+            if len(classement_trie) >= 2: pod2.metric(label="🥈 2ème Place", value=classement_trie[1][0], delta=f"{classement_trie[1][1][0]} pts")
+            if len(classement_trie) >= 3: pod3.metric(label="🥉 3ème Place", value=classement_trie[2][0], delta=f"{classement_trie[2][1][0]} pts")
         else:
-            st.info("Aucun joueur n'est encore qualifié pour le podium (en attente du seuil de 50%).")
+            st.info("Aucun joueur qualifié pour le moment.")
                 
-        # --- ETAPE 3 : CLASSEMENT OFFICIEL VS EN ATTENTE ---
         st.markdown("---")
         st.subheader("📋 Classement Général des Qualifiés")
+        if len(classement_trie) > 0:
+            donnees_classement = []
+            for rang, (joueur, (score, jours)) in enumerate(classement_trie, start=1):
+                icone = "🥇" if rang == 1 else "🥈" if rang == 2 else "🥉" if rang == 3 else "💀 (Miskine)" if rang == len(classement_trie) else "👤"
+                donnees_classement.append({"Rang": rang, "Statut": icone, "Joueur": joueur, "Score": f"{score} pts", "Présence": f"{jours} / {total_jours_ouvres} jours"})

@@ -38,7 +38,7 @@ mois_cle = st.sidebar.selectbox(
 FILE_PATH = f"scores_{mois_cle}_{annee_actuelle}.csv"
 st.sidebar.info(f"📂 Fichier actif : `{FILE_PATH}`")
 
-# Liste officielle des joueurs pour s'assurer qu'ils restent au format texte
+# Liste officielle des joueurs
 liste_joueurs = ['MR', 'MT', 'Kathaï', 'Sissy', 'Maxou', 'Seb', 'Stéphanou', 'Mickaël', 'Céline']
 
 # --- FONCTION DE CHARGEMENT DES DONNÉES ---
@@ -48,16 +48,32 @@ def charger_donnees_mensuelles(file_name):
         try:
             file_content = repo.get_contents(file_name)
             csv_data = file_content.decoded_content.decode('utf-8')
-            # On force pandas à lire toutes les colonnes des joueurs comme des chaînes de caractères (str)
             df = pd.read_csv(io.StringIO(csv_data), index_col=0)
             for j in df.columns:
                 df[j] = df[j].fillna('').astype(str)
             return repo, file_content.sha, df
         except Exception:
-            # Générer les jours du mois de 01 à 31
-            dates = [f"{i:02d}/{mois_cle}" for i in range(1, 32)]
-            init_data = {j: [''] * len(dates) for j in liste_joueurs}
-            init_data['DATE'] = dates
+            # --- MODIFICATION : EXCLUSION DES WEEK-ENDS ---
+            # 1. Définir le premier et le dernier jour du mois sélectionné
+            debut_mois = f"{annee_actuelle}-{mois_cle}-01"
+            # Trouver le dernier jour du mois en passant au mois suivant puis en retirant 1 jour
+            if mois_cle == "12":
+                fin_mois = f"{annee_actuelle}-12-31"
+            else:
+                prochain_mois = f"{int(mois_cle)+1:02d}"
+                fin_mois = (pd.to_datetime(f"{annee_actuelle}-{prochain_mois}-01") - pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+            
+            # 2. Générer uniquement les jours de la semaine (Lundi au Vendredi)
+            jours_ouvres = pd.bdate_range(start=debut_mois, end=fin_mois)
+            
+            # 3. Formater les dates en "JJ/MM" ou "Lun 01/09" pour coller au style de votre feuille d'origine
+            # Table de correspondance pour les jours en français
+            jours_fr = {0: "Lun", 1: "Mar", 2: "Mer", 3: "Jeu", 4: "Ven"}
+            dates_formatees = [f"{jours_fr[d.dayofweek]} {d.strftime('%d/%m')}" for d in jours_ouvres]
+            
+            # 4. Initialisation de la structure avec les jours filtrés
+            init_data = {j: [''] * len(dates_formatees) for j in liste_joueurs}
+            init_data['DATE'] = dates_formatees
             df_vierge = pd.DataFrame(init_data).set_index('DATE')
             return repo, None, df_vierge
     return None, None, pd.DataFrame()
@@ -65,19 +81,18 @@ def charger_donnees_mensuelles(file_name):
 current_repo, file_sha, df_mois = charger_donnees_mensuelles(FILE_PATH)
 
 if not df_mois.empty:
-    st.subheader(f"📝 Tableau de {MOIS_OPTIONS[mois_cle]} {annee_actuelle}")
+    st.subheader(f"📝 Tableau de {MOIS_OPTIONS[mois_cle]} {annee_actuelle} (Sans les week-ends)")
     
     if file_sha is None:
-        st.warning(f"ℹ️ Aucun historique trouvé pour ce mois. Un nouveau tableau vierge a été généré ci-dessous.")
+        st.warning(f"ℹ️ Aucun historique trouvé pour ce mois. Un nouveau tableau vierge (du lundi au vendredi) a été généré.")
 
-    # --- CORRECTION DU BUG DES ZÉROS ---
-    # On crée une configuration qui force chaque colonne de joueur à être un champ de texte libre (TextColumn)
+    # Configuration pour bloquer les zéros et forcer le texte
     configuration_colonnes = {
         joueur: st.column_config.TextColumn(label=joueur, default="") 
         for joueur in df_mois.columns
     }
 
-    # Éditeur interactif avec la configuration forcée en texte
+    # Éditeur interactif
     edited_df = st.data_editor(
         df_mois, 
         column_config=configuration_colonnes,
@@ -88,7 +103,6 @@ if not df_mois.empty:
     if st.button(f"💾 Sauvegarder {MOIS_OPTIONS[mois_cle]} sur GitHub", type="primary"):
         if current_repo:
             try:
-                # Nettoyage final des données avant sauvegarde pour éviter les valeurs parasites
                 df_sauvegarde = edited_df.copy()
                 for col in df_sauvegarde.columns:
                     df_sauvegarde[col] = df_sauvegarde[col].astype(str).str.replace('None', '').str.replace('nan', '')
@@ -124,7 +138,6 @@ if not df_mois.empty:
         
         for joueur in edited_df.columns:
             total = 0.0
-            # Nettoyage des chaînes textuelles pour le calcul
             valeurs = edited_df[joueur].astype(str).str.strip().str.lower()
             valeurs = valeurs.replace(['msr', 'mok', 'nsk', 'none', 'nan'], 'msk')
             

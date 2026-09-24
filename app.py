@@ -41,9 +41,20 @@ st.sidebar.info(f"📂 Fichier actif : `{FILE_PATH}`")
 # Liste officielle des joueurs
 liste_joueurs = ['MR', 'MT', 'Kathaï', 'Sissy', 'Maxou', 'Seb', 'Stéphanou', 'Mickaël', 'Céline']
 
-def est_un_weekend(chaine_date):
-    val = str(chaine_date).lower()
-    return "sam" in val or "dim" in val
+# Fonction pour générer la liste exacte des jours ouvrés (Lun au Ven)
+def generer_jours_ouvres():
+    debut_mois = f"{annee_actuelle}-{mois_cle}-01"
+    if mois_cle == "12":
+        fin_mois = f"{annee_actuelle}-12-31"
+    else:
+        prochain_mois = f"{int(mois_cle)+1:02d}"
+        fin_mois = (pd.to_datetime(f"{annee_actuelle}-{prochain_mois}-01") - pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+    
+    jours_ouvres = pd.bdate_range(start=debut_mois, end=fin_mois)
+    jours_fr = {0: "Lun", 1: "Mar", 2: "Mer", 3: "Jeu", 4: "Ven"}
+    return [f"{jours_fr[d.dayofweek]} {d.strftime('%d/%m')}" for d in jours_ouvres]
+
+dates_semaine_attendues = generer_jours_ouvres()
 
 # --- FONCTION DE CHARGEMENT DES DONNÉES ---
 @st.cache_data(ttl=2)
@@ -59,20 +70,9 @@ def charger_donnees_mensuelles(file_name):
             
             return repo, file_content.sha, df
         except Exception:
-            # Génération d'un nouveau mois vierge du Lundi au Vendredi
-            debut_mois = f"{annee_actuelle}-{mois_cle}-01"
-            if mois_cle == "12":
-                fin_mois = f"{annee_actuelle}-12-31"
-            else:
-                prochain_mois = f"{int(mois_cle)+1:02d}"
-                fin_mois = (pd.to_datetime(f"{annee_actuelle}-{prochain_mois}-01") - pd.Timedelta(days=1)).strftime('%Y-%m-%d')
-            
-            jours_ouvres = pd.bdate_range(start=debut_mois, end=fin_mois)
-            jours_fr = {0: "Lun", 1: "Mar", 2: "Mer", 3: "Jeu", 4: "Ven"}
-            dates_formatees = [f"{jours_fr[d.dayofweek]} {d.strftime('%d/%m')}" for d in jours_ouvres]
-            
-            init_data = {j: [''] * len(dates_formatees) for j in liste_joueurs}
-            init_data['DATE'] = dates_formatees
+            # Génération d'un nouveau mois vierge si inexistant
+            init_data = {j: [''] * len(dates_semaine_attendues) for j in liste_joueurs}
+            init_data['DATE'] = dates_semaine_attendues
             df_vierge = pd.DataFrame(init_data).set_index('DATE')
             return repo, None, df_vierge
     return None, None, pd.DataFrame()
@@ -82,40 +82,48 @@ current_repo, file_sha, df_mois = charger_donnees_mensuelles(FILE_PATH)
 if not df_mois.empty:
     st.subheader(f"📝 Tableau de {MOIS_OPTIONS[mois_cle]} {annee_actuelle}")
     
-    # --- BOUTON DE NETTOYAGE FORCÉ DES ANCIENS FICHIERS ---
-    deja_des_weekends = df_mois.index.to_series().apply(est_un_weekend).any()
-    if deja_des_weekends:
-        st.error("⚠️ Ce tableau contient d'anciennes lignes de week-end stockées sur GitHub.")
-        if st.button("🧹 Forcer la suppression des week-ends sur ce mois", type="secondary"):
-            df_nettoye = df_mois[~df_mois.index.to_series().apply(est_un_weekend)]
+    # --- BOUTON DE FORÇAGE DES DATES DU LUNDI AU VENDREDI ---
+    # Si le nombre de lignes ou les noms de lignes ne correspondent pas aux jours ouvrés
+    besoin_mise_a_niveau = list(df_mois.index) != dates_semaine_attendues
+    
+    if besoin_mise_a_niveau:
+        st.warning("⚙️ Le format des dates de ce mois a besoin d'être synchronisé du Lundi au Vendredi.")
+        if st.button("🔧 Appliquer le calendrier de la semaine (Conserve vos données)", type="secondary"):
+            # On crée un nouveau tableau vierge avec les bonnes dates
+            df_aligne = pd.DataFrame(index=dates_semaine_attendues, columns=liste_joueurs).fillna('')
+            
+            # On recopie les anciennes données ligne par ligne (dans la limite des places disponibles)
+            for i, (idx_ancien, row) in enumerate(df_mois.iterrows()):
+                if i < len(dates_semaine_attendues):
+                    date_cible = dates_semaine_attendues[i]
+                    df_aligne.loc[date_cible] = row
+            
             try:
                 csv_buffer = io.StringIO()
-                df_nettoye.to_csv(csv_buffer)
+                df_aligne.to_csv(csv_buffer)
                 if file_sha:
                     current_repo.update_file(
                         path=FILE_PATH,
-                        message="Nettoyage forcé des week-ends",
+                        message="Forçage du calendrier Lundi-Vendredi",
                         content=csv_buffer.getvalue(),
                         sha=file_sha
                     )
-                    st.success("✨ Week-ends supprimés avec succès ! Rechargement...")
+                    st.success("⚡ Calendrier mis à jour ! Rechargement de la page...")
                     st.cache_data.clear()
                     st.rerun()
             except Exception as e:
-                st.error(f"Erreur de nettoyage : {e}")
+                st.error(f"Erreur lors de la mise à niveau : {e}")
 
-    # Filtrage visuel
-    df_affichage = df_mois[~df_mois.index.to_series().apply(est_un_weekend)]
-
+    # Configuration des colonnes
     configuration_colonnes = {
         joueur: st.column_config.TextColumn(label=joueur, default="") 
-        for joueur in df_affichage.columns
+        for joueur in df_mois.columns
     }
 
-    # Éditeur interactif lié au filtre temporel (la clé change s'il y a des week-ends ou non)
-    widget_key = f"editor_{mois_cle}_{annee_actuelle}_{deja_des_weekends}"
+    # Éditeur interactif
+    widget_key = f"editor_{mois_cle}_{annee_actuelle}_{len(df_mois)}"
     edited_df = st.data_editor(
-        df_affichage, 
+        df_mois, 
         column_config=configuration_colonnes,
         use_container_width=True,
         key=widget_key

@@ -168,11 +168,15 @@ if not df_mois.empty:
         
         for joueur in edited_df.columns:
             total = 0.0
-            valeurs = edited_df[joueur].astype(str).str.strip().str.lower().replace(['msr', 'mok', 'nsk', 'none', 'nan'], 'msk')
+            valeurs = edited_df[joueur].astype(str).str.strip().str.lower()
+            valeurs = valeurs.replace(['msr', 'mok', 'nsk', 'none', 'nan'], 'msk')
             jours_joues = valeurs.apply(lambda x: x in ['/', 'x', 'msk']).sum()
             
             for symbole, points in SCORE_MAP.items():
-                count = valeurs.str.count(r'/').sum() if symbole == '/' else (valeurs == symbole).sum()
+                if symbole == '/':
+                    count = valeurs.str.count(r'/').sum()
+                else:
+                    count = (valeurs == symbole).sum()
                 total += count * points
             
             tous_les_scores[joueur] = (total, jours_joues)
@@ -197,9 +201,12 @@ if not df_mois.empty:
         
         if len(classement_trie) > 0:
             pod1, pod2, pod3 = st.columns(3)
-            if len(classement_trie) >= 1: pod1.metric(label="🥇 1ère Place", value=classement_trie[0][0], delta=f"{classement_trie[0][1][0]} pts")
-            if len(classement_trie) >= 2: pod2.metric(label="🥈 2ème Place", value=classement_trie[1][0], delta=f"{classement_trie[1][1][0]} pts")
-            if len(classement_trie) >= 3: pod3.metric(label="🥉 3ème Place", value=classement_trie[2][0], delta=f"{classement_trie[2][1][0]} pts")
+            if len(classement_trie) >= 1: 
+                pod1.metric(label="🥇 1ère Place", value=f"{classement_trie[0][0]}", delta=f"{classement_trie[0][1][0]} pts")
+            if len(classement_trie) >= 2: 
+                pod2.metric(label="🥈 2ème Place", value=f"{classement_trie[1][0]}", delta=f"{classement_trie[1][1][0]} pts")
+            if len(classement_trie) >= 3: 
+                pod3.metric(label="🥉 3ème Place", value=f"{classement_trie[2][0]}", delta=f"{classement_trie[2][1][0]} pts")
         else:
             st.info("Aucun joueur qualifié pour le moment.")
                 
@@ -208,5 +215,3 @@ if not df_mois.empty:
         if len(classement_trie) > 0:
             donnees_classement = []
             for rang, (joueur, (score, jours)) in enumerate(classement_trie, start=1):
-                icone = "🥇" if rang == 1 else "🥈" if rang == 2 else "🥉" if rang == 3 else "💀 (Miskine)" if rang == len(classement_trie) else "👤"
-                donnees_classement.append({

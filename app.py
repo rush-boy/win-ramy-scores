@@ -91,7 +91,7 @@ def charger_donnees_mensuelles(file_name):
 
 current_repo, file_sha, df_mois = charger_donnees_mensuelles(FILE_PATH)
 
-# --- ZONE D'IMPORTATION ---
+# --- ZONE D'IMPORTATION FORCEE ---
 st.markdown("### 📥 Importer un fichier de scores fourni par l'IA")
 fichier_importe = st.file_uploader(f"Glissez ici le fichier CSV pour {MOIS_OPTIONS[mois_cle]} {annee_actuelle}", type=["csv"])
 
@@ -101,14 +101,25 @@ if fichier_importe is not None and current_repo:
             bytes_data = fichier_importe.read()
             texte_decode = bytes_data.decode("utf-8-sig", errors="ignore")
             
+            # Charger le fichier de l'IA en ignorant les noms de lignes d'origine
             df_imp = pd.read_csv(io.StringIO(texte_decode), index_col=0)
-            df_imp.index.name = "DATE"
             
-            for j in df_imp.columns:
-                df_imp[j] = df_imp[j].fillna('').astype(str).str.replace('None', '').str.replace('nan', '')
+            # Créer un tableau tout neuf parfaitement adapté au mois en cours
+            df_final = generer_tableau_vierge()
+            
+            # Injecter les colonnes correspondantes
+            for col in df_final.columns:
+                if col in df_imp.columns:
+                    # Copier les valeurs reçues ligne par ligne
+                    for i in range(min(len(df_final), len(df_imp))):
+                        df_final.iloc[i, df_final.columns.get_loc(col)] = str(df_imp.iloc[i, df_imp.columns.get_loc(col)])
+            
+            # Nettoyage final des valeurs invalides
+            for j in df_final.columns:
+                df_final[j] = df_final[j].fillna('').astype(str).str.replace('None', '').str.replace('nan', '')
             
             csv_buffer = io.StringIO()
-            df_imp.to_csv(csv_buffer)
+            df_final.to_csv(csv_buffer)
             contenu_imp = csv_buffer.getvalue()
             
             try:
@@ -118,11 +129,11 @@ if fichier_importe is not None and current_repo:
                 sha_actuel = None
             
             if sha_actuel:
-                current_repo.update_file(path=FILE_PATH, message="Importation sécurisée", content=contenu_imp, sha=sha_actuel)
+                current_repo.update_file(path=FILE_PATH, message="Importation forcee réussie", content=contenu_imp, sha=sha_actuel)
             else:
-                current_repo.create_file(path=FILE_PATH, message="Création par importation sécurisée", content=contenu_imp)
+                current_repo.create_file(path=FILE_PATH, message="Création par importation forcee", content=contenu_imp)
                 
-            st.success("✅ Fichier importé avec succès !")
+            st.success("✅ Le tableau a été complété automatiquement avec succès !")
             st.cache_data.clear()
             st.rerun()
         except Exception as e:
@@ -136,26 +147,9 @@ if df_mois is not None and not df_mois.empty:
     
     df_mois.index.name = "DATE"
     
+    # Sécurité pour s'assurer que l'index a toujours les bonnes dates
     if list(df_mois.index) != dates_semaine_attendues:
-        st.warning("⚙️ Le format des dates de ce mois a besoin d'être synchronisé du Lundi au Vendredi.")
-        if st.button("🔧 Appliquer le calendrier de la semaine", type="secondary"):
-            df_aligne = pd.DataFrame(index=dates_semaine_attendues, columns=liste_joueurs).fillna('')
-            for i, (idx_ancien, row) in enumerate(df_mois.iterrows()):
-                if i < len(dates_semaine_attendues) and idx_ancien in df_aligne.index:
-                    df_aligne.loc[idx_ancien] = row
-            try:
-                csv_buffer = io.StringIO()
-                df_aligne.to_csv(csv_buffer)
-                try:
-                    fe = current_repo.get_contents(FILE_PATH)
-                    current_repo.update_file(path=FILE_PATH, message="Forçage calendrier", content=csv_buffer.getvalue(), sha=fe.sha)
-                except Exception:
-                    current_repo.create_file(path=FILE_PATH, message="Création calendrier", content=csv_buffer.getvalue())
-                st.success("⚡ Calendrier synchronisé !")
-                st.cache_data.clear()
-                st.rerun()
-            except Exception as e:
-                st.error(f"Erreur : {e}")
+        df_mois = generer_tableau_vierge()
 
     configuration_colonnes = {}
     for joueur in liste_joueurs:
@@ -197,9 +191,10 @@ if df_mois is not None and not df_mois.empty:
             except Exception as error:
                 st.error(f"Erreur de sauvegarde : {error}")
 
-    # --- SECTION CALCULS ET CLASSEMENT SANS AUCUN RISQUE D'INDENTATION ---
+    # --- SECTION CALCULS ---
     st.markdown("---")
     if st.button("🔄 Calculer les scores du mois"):
+        SCORE_MAP = {'/': 0.5, 'x': 2.0, 'msk': -1.0}
         scores_qualifies = {}
         scores_disqualifies = {}
         tous_les_scores = {}
@@ -210,7 +205,6 @@ if df_mois is not None and not df_mois.empty:
             valeurs = edited_df[joueur].astype(str).str.strip().str.lower()
             valeurs = valeurs.replace(['msr', 'mok', 'nsk', 'none', 'nan'], 'msk')
             
-            # Calcul direct et ultra-sécurisé sans sous-boucles
             nb_win = (valeurs == 'x').sum()
             nb_pres = valeurs.str.count(r'/').sum()
             nb_msk = (valeurs == 'msk').sum()
@@ -236,3 +230,11 @@ if df_mois is not None and not df_mois.empty:
 
         st.markdown("---")
         st.subheader("🏆 Le Podium Officiel (≥ 50% du mois)")
+        classement_trie = sorted(scores_qualifies.items(), key=lambda item: item[1][0], reverse=True)
+        
+        if len(classement_trie) > 0:
+            pod1, pod2, pod3 = st.columns(3)
+            if len(classement_trie) >= 1:
+                p1_name, (p1_score, p1_j) = classement_trie[0]
+                pod1.metric(label=f"🥇 1er : {p1_name}", value=f"{p1_score} pts", delta=f"{p1_j} jours")
+            if len(classement_trie) >= 2:

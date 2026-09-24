@@ -149,65 +149,85 @@ if not df_mois.empty:
             except Exception as error:
                 st.error(f"Erreur lors de la sauvegarde : {error}")
 
-    # --- CALCUL ET PODIUM TRAITÉS SANS ERREUR ---
+    # --- SECTION CALCUL + FILTRE 50% PARTICIPATION ---
     st.markdown("---")
     if st.button("🔄 Calculer les totaux et afficher le classement"):
         SCORE_MAP = {'/': 0.5, 'x': 2.0, 'msk': -1.0}
-        scores_totaux = {}
+        
+        scores_qualifies = {}
+        scores_disqualifies = {}
+        
+        total_jours_ouvres = len(edited_df)
+        seuil_minimum = total_jours_ouvres / 2
+        
+        st.sidebar.markdown("### 📊 Seuil de présence")
+        st.sidebar.write(f"Nombre de jours ce mois : **{total_jours_ouvres}**")
+        st.sidebar.write(f"Minimum requis pour le classement : **{seuil_minimum:.1f}** jours joués.")
         
         for joueur in edited_df.columns:
             total = 0.0
             valeurs = edited_df[joueur].astype(str).str.strip().str.lower()
-            # Séparation de la ligne problématique en une syntaxe classique universelle
             valeurs = valeurs.replace(['msr', 'mok', 'nsk', 'none', 'nan'], 'msk')
             
+            # Compter combien de fois le joueur a joué (toutes cases non vides)
+            jours_joues = valeurs.apply(lambda x: x in ['/', 'x', 'msk']).sum()
+            
+            # Calcul des points
             for symbole, points in SCORE_MAP.items():
                 if symbole == '/':
                     count = valeurs.str.count(r'/').sum()
                 else:
                     count = (valeurs == symbole).sum()
                 total += count * points
-            scores_totaux[joueur] = total
             
-        # Trier les joueurs par score décroissant
-        classement_trie = sorted(scores_totaux.items(), key=lambda item: item[1], reverse=True)
+            # Vérification de la règle des 50% de participation
+            if jours_joues >= seuil_minimum:
+                scores_qualifies[joueur] = (total, jours_joues)
+            else:
+                scores_disqualifies[joueur] = (total, jours_joues)
+            
+        # Trier les qualifiés par score décroissant
+        classement_trie = sorted(scores_qualifies.items(), key=lambda item: item[1][0], reverse=True)
         
-        # 1. Affichage du TOP 3 (Le Podium)
-        st.subheader(f"🏆 Le Podium de {MOIS_OPTIONS[mois_cle]}")
+        # 1. Affichage du TOP 3 (Le Podium des Qualifiés uniquement)
+        st.subheader(f"🏆 Le Podium de {MOIS_OPTIONS[mois_cle]} (Joueurs Qualifiés ≥ 50% du mois)")
         
-        pod1, pod2, pod3 = st.columns(3)
-        
-        if len(classement_trie) >= 1:
-            with pod1:
-                st.markdown(f"### 🥇 1ère Place")
-                st.metric(label=classement_trie[0][0], value=f"{classement_trie[0][1]} pts", delta="🔥")
-        if len(classement_trie) >= 2:
-            with pod2:
-                st.markdown(f"### 🥈 2ème Place")
-                st.metric(label=classement_trie[1][0], value=f"{classement_trie[1][1]} pts")
-        if len(classement_trie) >= 3:
-            with pod3:
-                st.markdown(f"### 🥉 3ème Place")
-                st.metric(label=classement_trie[2][0], value=f"{classement_trie[2][1]} pts")
+        if len(classement_trie) > 0:
+            pod1, pod2, pod3 = st.columns(3)
+            
+            if len(classement_trie) >= 1:
+                with pod1:
+                    st.markdown(f"### 🥇 1ère Place")
+                    st.metric(label=classement_trie[0][0], value=f"{classement_trie[0][1][0]} pts", delta=f"{classement_trie[0][1][1]}j joués")
+            if len(classement_trie) >= 2:
+                with pod2:
+                    st.markdown(f"### 🥈 2ème Place")
+                    st.metric(label=classement_trie[1][0], value=f"{classement_trie[1][1][0]} pts", delta=f"{classement_trie[1][1][1]}j joués")
+            if len(classement_trie) >= 3:
+                with pod3:
+                    st.markdown(f"### 🥉 3ème Place")
+                    st.metric(label=classement_trie[2][0], value=f"{classement_trie[2][1][0]} pts", delta=f"{classement_trie[2][1][1]}j joués")
+        else:
+            st.info("Aucun joueur n'a atteint le seuil minimum de participation pour être classé ce mois-ci.")
                 
         # 2. Affichage du classement général complet
         st.markdown("---")
         st.subheader("📊 Classement Général Complet")
         
-        donnees_classement = []
-        for rang, (joueur, score) in enumerate(classement_trie, start=1):
-            if rang == 1: icone = "🥇"
-            elif rang == 2: icone = "🥈"
-            elif rang == 3: icone = "🥉"
-            elif rang == len(classement_trie): icone = "💀 (Miskine)"
-            else: icone = "👤"
-            
-            donnees_classement.append({
-                "Rang": rang,
-                "Statut": icone,
-                "Joueur": joueur,
-                "Score Total": f"{score} pts"
-            })
-            
-        df_classement = pd.DataFrame(donnees_classement)
-        st.dataframe(df_classement.set_index("Rang"), use_container_width=True)
+        if len(classement_trie) > 0:
+            donnees_classement = []
+            for rang, (joueur, (score, jours)) in enumerate(classement_trie, start=1):
+                if rang == 1: icone = "🥇"
+                elif rang == 2: icone = "🥈"
+                elif rang == 3: icone = "🥉"
+                elif rang == len(classement_trie): icone = "💀 (Miskine)"
+                else: icone = "👤"
+                
+                donnees_classement.append({
+                    "Rang": rang,
+                    "Statut": icone,
+                    "Joueur": joueur,
+                    "Score Total": f"{score} pts",
+                    "Jours Actifs": f"{jours} / {total_jours_ouvres}"
+                })
+            df_classement = pd.DataFrame(donnees_classement)

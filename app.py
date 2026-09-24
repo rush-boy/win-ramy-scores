@@ -61,7 +61,6 @@ def generer_tableau_vierge():
     init_data['DATE'] = dates_semaine_attendues
     return pd.DataFrame(init_data).set_index('DATE')
 
-# Bouton d'urgence pour vider le cache et réinitialiser
 if st.sidebar.button("🔄 Forcer la synchronisation (Vider le cache)"):
     st.cache_data.clear()
     st.rerun()
@@ -123,7 +122,7 @@ if fichier_importe is not None and current_repo:
             else:
                 current_repo.create_file(path=FILE_PATH, message="Création par importation sécurisée", content=contenu_imp)
                 
-            st.success("✅ Fichier importé avec succès ! Rechargement de l'écran...")
+            st.success("✅ Fichier importé avec succès !")
             st.cache_data.clear()
             st.rerun()
         except Exception as e:
@@ -198,10 +197,9 @@ if df_mois is not None and not df_mois.empty:
             except Exception as error:
                 st.error(f"Erreur de sauvegarde : {error}")
 
-    # --- SECTION CALCULS ---
+    # --- SECTION CALCULS ET CLASSEMENT SANS AUCUN RISQUE D'INDENTATION ---
     st.markdown("---")
     if st.button("🔄 Calculer les scores du mois"):
-        SCORE_MAP = {'/': 0.5, 'x': 2.0, 'msk': -1.0}
         scores_qualifies = {}
         scores_disqualifies = {}
         tous_les_scores = {}
@@ -209,20 +207,18 @@ if df_mois is not None and not df_mois.empty:
         seuil_minimum = total_jours_ouvres / 2
         
         for joueur in edited_df.columns:
-            total = 0.0
             valeurs = edited_df[joueur].astype(str).str.strip().str.lower()
             valeurs = valeurs.replace(['msr', 'mok', 'nsk', 'none', 'nan'], 'msk')
-            jours_joues = valeurs.apply(lambda x: x in ['/', 'x', 'msk']).sum()
             
-            for symbole, points in SCORE_MAP.items():
-                if symbole == '/':
-                    count = valeurs.str.count(r'/').sum()
-                else:
-                    count = (valeurs == symbole).sum()
-                total += count * points
+            # Calcul direct et ultra-sécurisé sans sous-boucles
+            nb_win = (valeurs == 'x').sum()
+            nb_pres = valeurs.str.count(r'/').sum()
+            nb_msk = (valeurs == 'msk').sum()
+            
+            total = (nb_win * 2.0) + (nb_pres * 0.5) + (nb_msk * -1.0)
+            jours_joues = nb_win + nb_pres + nb_msk
             
             tous_les_scores[joueur] = (total, jours_joues)
-            
             if jours_joues >= seuil_minimum:
                 scores_qualifies[joueur] = (total, jours_joues)
             else:
@@ -232,7 +228,11 @@ if df_mois is not None and not df_mois.empty:
         cols = st.columns(len(tous_les_scores))
         for idx, (joueur, (total, jours)) in enumerate(tous_les_scores.items()):
             with cols[idx]:
-                statut_text = f"{jours}/{total_jours_ouvres}j"
+                txt_j = f"{jours}/{total_jours_ouvres}j"
                 if jours < seuil_minimum:
-                    st.metric(label=f"{joueur} ⚠️", value=f"{total} pts", delta=f"Incomplet ({statut_text})", delta_color="inverse")
+                    st.metric(label=f"{joueur} ⚠️", value=f"{total} pts", delta=f"Incomplet ({txt_j})", delta_color="inverse")
                 else:
+                    st.metric(label=joueur, value=f"{total} pts", delta=f"Qualifié ({txt_j})", delta_color="normal" if total > 0 else "off")
+
+        st.markdown("---")
+        st.subheader("🏆 Le Podium Officiel (≥ 50% du mois)")

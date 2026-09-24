@@ -55,8 +55,9 @@ def generer_jours_ouvres():
 
 dates_semaine_attendues = generer_jours_ouvres()
 
-# --- BASE DE DONNÉES INJECTÉE POUR SEPTEMBRE ---
-def generer_tableau_defaut():
+# --- BASE DE DONNÉES INJECTÉE INFAILLIBLE ---
+def obtenir_tableau_final():
+    # Si on est en Septembre 2026, on affiche DIRECTEMENT les scores sans regarder GitHub
     if mois_cle == "09" and str(annee_actuelle) == "2026":
         donnees_septembre = {
             'MR': ['/', '/', 'msk', 'msk', 'X', '/', 'msk', '/', 'X', '/', 'msk', '/', 'msk', '/', '', 'X', '/', 'X', '', '', '', ''],
@@ -72,40 +73,32 @@ def generer_tableau_defaut():
         df = pd.DataFrame(donnees_septembre, index=dates_semaine_attendues)
         df.index.name = 'DATE'
         return df
-    else:
-        init_data = {j: [''] * len(dates_semaine_attendues) for j in liste_joueurs}
-        init_data['DATE'] = dates_semaine_attendues
-        return pd.DataFrame(init_data).set_index('DATE')
+
+    # Pour les autres mois, on tente de charger depuis GitHub
+    if repo:
+        try:
+            file_content = repo.get_contents(FILE_PATH)
+            csv_data = file_content.decoded_content.decode('utf-8-sig')
+            if csv_data.strip():
+                df = pd.read_csv(io.StringIO(csv_data), index_col=0)
+                if not df.empty and len(df.columns) > 0:
+                    for j in df.columns:
+                        df[j] = df[j].fillna('').astype(str).str.replace('None', '').str.replace('nan', '')
+                    df.index.name = 'DATE'
+                    return df
+        except Exception:
+            pass
+
+    # Tableau vide par défaut si rien n'est trouvé
+    init_data = {j: [''] * len(dates_semaine_attendues) for j in liste_joueurs}
+    init_data['DATE'] = dates_semaine_attendues
+    return pd.DataFrame(init_data).set_index('DATE')
+
+df_mois = obtenir_tableau_final()
 
 if st.sidebar.button("🔄 Forcer la synchronisation (Vider le cache)"):
     st.cache_data.clear()
     st.rerun()
-
-# --- FONCTION DE CHARGEMENT ---
-@st.cache_data(ttl=2)
-def charger_donnees_mensuelles(file_name):
-    if not repo:
-        return None, None, generer_tableau_defaut()
-    try:
-        file_content = repo.get_contents(file_name)
-        csv_data = file_content.decoded_content.decode('utf-8-sig')
-        
-        if not csv_data.strip():
-            return repo, file_content.sha, generer_tableau_defaut()
-            
-        df = pd.read_csv(io.StringIO(csv_data), index_col=0)
-        
-        if df.empty or len(df.columns) == 0:
-            return repo, file_content.sha, generer_tableau_defaut()
-            
-        for j in df.columns:
-            df[j] = df[j].fillna('').astype(str).str.replace('None', '').str.replace('nan', '')
-        
-        return repo, file_content.sha, df
-    except Exception:
-        return repo, None, generer_tableau_defaut()
-
-current_repo, file_sha, df_mois = charger_donnees_mensuelles(FILE_PATH)
 
 st.markdown("---")
 
@@ -113,11 +106,6 @@ st.markdown("---")
 if df_mois is not None and not df_mois.empty:
     st.subheader(f"📝 Tableau de {MOIS_OPTIONS[mois_cle]} {annee_actuelle}")
     
-    df_mois.index.name = "DATE"
-    
-    if list(df_mois.index) != dates_semaine_attendues:
-        df_mois = generer_tableau_defaut()
-
     configuration_colonnes = {}
     for joueur in liste_joueurs:
         if joueur in df_mois.columns:
@@ -133,13 +121,13 @@ if df_mois is not None and not df_mois.empty:
     )
 
     if st.button(f"💾 Enregistrer les modifications", type="primary"):
-        if current_repo:
+        if repo:
             try:
                 try:
-                    fe = current_repo.get_contents(FILE_PATH)
+                    fe = repo.get_contents(FILE_PATH)
                     sha_maj = fe.sha
                 except Exception:
-                    sha_maj = file_sha
+                    sha_maj = None
 
                 df_sauvegarde = edited_df.copy()
                 for col in df_sauvegarde.columns:
@@ -149,20 +137,21 @@ if df_mois is not None and not df_mois.empty:
                 df_sauvegarde.to_csv(csv_buffer)
                 
                 if sha_maj:
-                    current_repo.update_file(path=FILE_PATH, message="Mise à jour manuelle", content=csv_buffer.getvalue(), sha=sha_maj)
+                    repo.update_file(path=FILE_PATH, message="Mise à jour manuelle", content=csv_buffer.getvalue(), sha=sha_maj)
                 else:
-                    current_repo.create_file(path=FILE_PATH, message="Création manuelle", content=csv_buffer.getvalue())
-                st.success("✅ Enregistré avec succès !")
+                    repo.create_file(path=FILE_PATH, message="Création manuelle", content=csv_buffer.getvalue())
+                st.success("✅ Enregistré avec succès sur GitHub !")
                 st.cache_data.clear()
                 st.rerun()
             except Exception as error:
                 st.error(f"Erreur de sauvegarde : {error}")
         else:
-            st.warning("⚠️ Mode local : Modifications éditées à l'écran mais non sauvegardées sur GitHub (Vérifiez vos secrets Streamlit).")
+            st.warning("⚠️ Mode local : Modifications éditées à l'écran mais non sauvegardées sur GitHub.")
 
     # --- SECTION CALCULS ---
     st.markdown("---")
     if st.button("🔄 Calculer les scores du mois"):
+        SCORE_MAP = {'/': 0.5, 'x': 2.0, 'msk': -1.0}
         scores_qualifies = {}
         scores_disqualifies = {}
         tous_les_scores = {}
@@ -228,3 +217,5 @@ if df_mois is not None and not df_mois.empty:
         st.subheader("📋 Classement Général des Qualifiés")
         if len(classement_trie) > 0:
             donnees_classement = []
+            for rang, (joueur, (score, jours)) in enumerate(classement_trie, start=1):
+                icone = "🥇" if rang == 1 else "🥈" if rang == 2 else "🥉" if rang == 3 else "💀 (Miskine)" if rang == len(classement_trie) else "👤"

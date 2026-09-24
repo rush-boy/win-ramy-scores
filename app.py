@@ -67,7 +67,7 @@ def charger_donnees_mensuelles(file_name):
     if repo:
         try:
             file_content = repo.get_contents(file_name)
-            csv_data = file_content.decoded_content.decode('utf-8')
+            csv_data = file_content.decoded_content.decode('utf-8-sig') # Sécurisé ici aussi
             df = pd.read_csv(io.StringIO(csv_data), index_col=0)
             
             for j in df.columns:
@@ -83,22 +83,26 @@ def charger_donnees_mensuelles(file_name):
 
 current_repo, file_sha, df_mois = charger_donnees_mensuelles(FILE_PATH)
 
-# --- ZONE D'IMPORTATION DIRECTE DE FICHIER CSV ---
+# --- ZONE D'IMPORTATION BLINDÉE CONTRE LES ERREURS D'ENCODAGE ---
 st.markdown("### 📥 Importer un fichier de scores fourni par l'IA")
 fichier_importe = st.file_uploader(f"Glissez ici le fichier CSV pour {MOIS_OPTIONS[mois_cle]} {annee_actuelle}", type=["csv"])
 
 if fichier_importe is not None and current_repo:
     if st.button("🚀 Valider l'importation et écraser le tableau actuel", type="secondary"):
         try:
-            df_imp = pd.read_csv(fichier_importe, index_col=0)
+            # CORRECTION DU BUG : Lecture tolérante aux signatures de fichiers Microsoft (BOM)
+            bytes_data = fichier_importe.read()
+            texte_decode = bytes_data.decode("utf-8-sig", errors="ignore")
+            
+            df_imp = pd.read_csv(io.StringIO(texte_decode), index_col=0)
             csv_buffer = io.StringIO()
             df_imp.to_csv(csv_buffer)
             contenu_imp = csv_buffer.getvalue()
             
             if file_sha:
-                current_repo.update_file(path=FILE_PATH, message="Importation de fichier", content=contenu_imp, sha=file_sha)
+                current_repo.update_file(path=FILE_PATH, message="Importation de fichier sécurisée", content=contenu_imp, sha=file_sha)
             else:
-                current_repo.create_file(path=FILE_PATH, message="Création par importation", content=contenu_imp)
+                current_repo.create_file(path=FILE_PATH, message="Création par importation sécurisée", content=contenu_imp)
                 
             st.success("✅ Fichier importé avec succès ! Rechargement...")
             st.cache_data.clear()
@@ -190,7 +194,7 @@ if not df_mois.empty:
 
         st.markdown("---")
         st.subheader(f"🏆 Le Podium Officiel (≥ 50% du mois)")
-        classement_trie = sorted(scores_qualifies.items(), key=lambda item: item[1][0], reverse=True)
+        classement_trie = sorted(scores_qualifies.items(), key=lambda item: item, reverse=True)
         
         if len(classement_trie) > 0:
             pod1, pod2, pod3 = st.columns(3)
@@ -205,5 +209,3 @@ if not df_mois.empty:
         if len(classement_trie) > 0:
             donnees_classement = []
             for rang, (joueur, (score, jours)) in enumerate(classement_trie, start=1):
-                icone = "🥇" if rang == 1 else "🥈" if rang == 2 else "🥉" if rang == 3 else "💀 (Miskine)" if rang == len(classement_trie) else "👤"
-                donnees_classement.append({"Rang": rang, "Statut": icone, "Joueur": joueur, "Score": f"{score} pts", "Présence": f"{jours} / {total_jours_ouvres} jours"})

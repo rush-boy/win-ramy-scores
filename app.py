@@ -67,7 +67,7 @@ def charger_donnees_mensuelles(file_name):
     if repo:
         try:
             file_content = repo.get_contents(file_name)
-            csv_data = file_content.decoded_content.decode('utf-8-sig') # Sécurisé ici aussi
+            csv_data = file_content.decoded_content.decode('utf-8-sig')
             df = pd.read_csv(io.StringIO(csv_data), index_col=0)
             
             for j in df.columns:
@@ -90,7 +90,6 @@ fichier_importe = st.file_uploader(f"Glissez ici le fichier CSV pour {MOIS_OPTIO
 if fichier_importe is not None and current_repo:
     if st.button("🚀 Valider l'importation et écraser le tableau actuel", type="secondary"):
         try:
-            # CORRECTION DU BUG : Lecture tolérante aux signatures de fichiers Microsoft (BOM)
             bytes_data = fichier_importe.read()
             texte_decode = bytes_data.decode("utf-8-sig", errors="ignore")
             
@@ -194,7 +193,7 @@ if not df_mois.empty:
 
         st.markdown("---")
         st.subheader(f"🏆 Le Podium Officiel (≥ 50% du mois)")
-        classement_trie = sorted(scores_qualifies.items(), key=lambda item: item, reverse=True)
+        classement_trie = sorted(scores_qualifies.items(), key=lambda item: item[1][0], reverse=True)
         
         if len(classement_trie) > 0:
             pod1, pod2, pod3 = st.columns(3)
@@ -209,3 +208,5 @@ if not df_mois.empty:
         if len(classement_trie) > 0:
             donnees_classement = []
             for rang, (joueur, (score, jours)) in enumerate(classement_trie, start=1):
+                icone = "🥇" if rang == 1 else "🥈" if rang == 2 else "🥉" if rang == 3 else "💀 (Miskine)" if rang == len(classement_trie) else "👤"
+                donnees_classement.append({

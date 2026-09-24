@@ -58,7 +58,6 @@ dates_semaine_attendues = generer_jours_ouvres()
 # --- BASE DE DONNÉES INJECTÉE POUR SEPTEMBRE ---
 def generer_tableau_defaut():
     if mois_cle == "09" and str(annee_actuelle) == "2026":
-        # Injection directe des scores du scan de septembre pour contourner le bug d'importation
         donnees_septembre = {
             'MR': ['/', '/', 'msk', 'msk', 'X', '/', 'msk', '/', 'X', '/', 'msk', '/', 'msk', '/', '', 'X', '/', 'X', '', '', '', ''],
             'MT': ['msk', 'X', 'X', 'X', '/', '/', '', '', 'msk', '', 'X', 'X', '', '', '', '/', 'X', 'msk', '', '', '', ''],
@@ -164,7 +163,6 @@ if df_mois is not None and not df_mois.empty:
     # --- SECTION CALCULS ---
     st.markdown("---")
     if st.button("🔄 Calculer les scores du mois"):
-        SCORE_MAP = {'/': 0.5, 'x': 2.0, 'msk': -1.0}
         scores_qualifies = {}
         scores_disqualifies = {}
         tous_les_scores = {}
@@ -207,13 +205,22 @@ if df_mois is not None and not df_mois.empty:
             pod1, pod2, pod3 = st.columns(3)
             
             if len(classement_trie) >= 1:
-                pod1.metric(label=f"🥇 1er : {classement_trie[0][0]}", value=f"{classement_trie[0][1][0]} pts", delta=f"{classement_trie[0][1][1]} jours")
+                p1_name = classement_trie[0][0]
+                p1_score = classement_trie[0][1][0]
+                p1_j = classement_trie[0][1][1]
+                pod1.metric(label=f"🥇 1er : {p1_name}", value=f"{p1_score} pts", delta=f"{p1_j} jours")
                 
             if len(classement_trie) >= 2:
-                pod2.metric(label=f"🥈 2e : {classement_trie[1][0]}", value=f"{classement_trie[1][1][0]} pts", delta=f"{classement_trie[1][1][1]} jours")
+                p2_name = classement_trie[1][0]
+                p2_score = classement_trie[1][1][0]
+                p2_j = classement_trie[1][1][1]
+                pod2.metric(label=f"🥈 2e : {p2_name}", value=f"{p2_score} pts", delta=f"{p2_j} jours")
                 
             if len(classement_trie) >= 3:
-                pod3.metric(label=f"🥉 3e : {classement_trie[2][0]}", value=f"{classement_trie[2][1][0]} pts", delta=f"{classement_trie[2][1][1]} jours")
+                p3_name = classement_trie[2][0]
+                p3_score = classement_trie[2][1][0]
+                p3_j = classement_trie[2][1][1]
+                pod3.metric(label=f"🥉 3e : {p3_name}", value=f"{p3_score} pts", delta=f"{p3_j} jours")
         else:
             st.info("Aucun joueur qualifié pour le moment.")
                 
@@ -221,4 +228,3 @@ if df_mois is not None and not df_mois.empty:
         st.subheader("📋 Classement Général des Qualifiés")
         if len(classement_trie) > 0:
             donnees_classement = []
-            for rang, (joueur, (score, jours)) in enumerate(classement_trie, start=1):

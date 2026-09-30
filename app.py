@@ -55,9 +55,24 @@ def generer_jours_ouvres():
 
 dates_semaine_attendues = generer_jours_ouvres()
 
-# --- BASE DE DONNÉES INJECTÉE INFAILLIBLE ---
+# --- BASE DE DONNÉES INJECTÉE EN CAS D'ABSENCE DE FICHIER ---
 def obtenir_tableau_final():
-    # Si on est en Septembre 2026, on affiche DIRECTEMENT les scores sans regarder GitHub
+    # 1. On tente TOUJOURS de charger depuis GitHub en premier (pour conserver vos modifications sauvegardées)
+    if repo:
+        try:
+            file_content = repo.get_contents(FILE_PATH)
+            csv_data = file_content.decoded_content.decode('utf-8-sig')
+            if csv_data.strip():
+                df = pd.read_csv(io.StringIO(csv_data), index_col=0)
+                if not df.empty and len(df.columns) > 0:
+                    for j in df.columns:
+                        df[j] = df[j].fillna('').astype(str).str.replace('None', '').str.replace('nan', '')
+                    df.index.name = 'DATE'
+                    return df
+        except Exception:
+            pass
+
+    # 2. Si le fichier n'est pas encore sur GitHub ET qu'on est en Septembre 2026, on injecte les données de départ
     if mois_cle == "09" and str(annee_actuelle) == "2026":
         donnees_septembre = {
             'MR': ['/', '/', 'msk', 'msk', 'X', '/', 'msk', '/', 'X', '/', 'msk', '/', 'msk', '/', '', 'X', '/', 'X', '', '', '', ''],
@@ -74,22 +89,7 @@ def obtenir_tableau_final():
         df.index.name = 'DATE'
         return df
 
-    # Pour les autres mois, on tente de charger depuis GitHub
-    if repo:
-        try:
-            file_content = repo.get_contents(FILE_PATH)
-            csv_data = file_content.decoded_content.decode('utf-8-sig')
-            if csv_data.strip():
-                df = pd.read_csv(io.StringIO(csv_data), index_col=0)
-                if not df.empty and len(df.columns) > 0:
-                    for j in df.columns:
-                        df[j] = df[j].fillna('').astype(str).str.replace('None', '').str.replace('nan', '')
-                    df.index.name = 'DATE'
-                    return df
-        except Exception:
-            pass
-
-    # Tableau vide par défaut si rien n'est trouvé
+    # 3. Tableau vide par défaut si rien n'est trouvé
     init_data = {j: [''] * len(dates_semaine_attendues) for j in liste_joueurs}
     init_data['DATE'] = dates_semaine_attendues
     return pd.DataFrame(init_data).set_index('DATE')
@@ -160,7 +160,7 @@ if df_mois is not None and not df_mois.empty:
         
         for joueur in edited_df.columns:
             valeurs = edited_df[joueur].astype(str).str.strip().str.lower()
-            valeurs = valeurs.replace(['msr', 'mok', 'nsk', 'none', 'nan'], 'msk')
+            valeurs = valores = valeurs.replace(['msr', 'mok', 'nsk', 'none', 'nan'], 'msk')
             
             nb_win = (valeurs == 'x').sum()
             nb_pres = valeurs.str.count(r'/').sum()
@@ -184,38 +184,4 @@ if df_mois is not None and not df_mois.empty:
                 if jours < seuil_minimum:
                     st.metric(label=f"{joueur} ⚠️", value=f"{total} pts", delta=f"Incomplet ({txt_j})", delta_color="inverse")
                 else:
-                    st.metric(label=joueur, value=f"{total} pts", delta=f"Qualifié ({txt_j})", delta_color="normal" if total > 0 else "off")
-
-        st.markdown("---")
-        st.subheader("🏆 Le Podium Officiel (≥ 50% du mois)")
-        classement_trie = sorted(scores_qualifies.items(), key=lambda item: item[1][0], reverse=True)
-        
-        if len(classement_trie) > 0:
-            pod1, pod2, pod3 = st.columns(3)
-            
-            if len(classement_trie) >= 1:
-                p1_name = classement_trie[0][0]
-                p1_score = classement_trie[0][1][0]
-                p1_j = classement_trie[0][1][1]
-                pod1.metric(label=f"🥇 1er : {p1_name}", value=f"{p1_score} pts", delta=f"{p1_j} jours")
-                
-            if len(classement_trie) >= 2:
-                p2_name = classement_trie[1][0]
-                p2_score = classement_trie[1][1][0]
-                p2_j = classement_trie[1][1][1]
-                pod2.metric(label=f"🥈 2e : {p2_name}", value=f"{p2_score} pts", delta=f"{p2_j} jours")
-                
-            if len(classement_trie) >= 3:
-                p3_name = classement_trie[2][0]
-                p3_score = classement_trie[2][1][0]
-                p3_j = classement_trie[2][1][1]
-                pod3.metric(label=f"🥉 3e : {p3_name}", value=f"{p3_score} pts", delta=f"{p3_j} jours")
-        else:
-            st.info("Aucun joueur qualifié pour le moment.")
-                
-        st.markdown("---")
-        st.subheader("📋 Classement Général des Qualifiés")
-        if len(classement_trie) > 0:
-            donnees_classement = []
-            for rang, (joueur, (score, jours)) in enumerate(classement_trie, start=1):
-                icone = "🥇" if rang == 1 else "🥈" if rang == 2 else "🥉" if rang == 3 else "💀 (Miskine)" if rang == len(classement_trie) else "👤"
+                    st.metric(label=joueur, value=f"{total} pts", delta=f"Qualifié ({txt_j})")

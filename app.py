@@ -148,7 +148,7 @@ if df_mois is not None and not df_mois.empty:
         else:
             st.warning("⚠️ Mode local : Modifications éditées à l'écran mais non sauvegardées sur GitHub.")
 
-    # --- SECTION CALCULS ---
+    # --- SECTION CALCULS & PODIUM ---
     st.markdown("---")
     if st.button("🔄 Calculer les scores du mois"):
         SCORE_MAP = {'/': 0.5, 'x': 2.0, 'msk': -1.0}
@@ -160,7 +160,7 @@ if df_mois is not None and not df_mois.empty:
         
         for joueur in edited_df.columns:
             valeurs = edited_df[joueur].astype(str).str.strip().str.lower()
-            valeurs = valores = valeurs.replace(['msr', 'mok', 'nsk', 'none', 'nan'], 'msk')
+            valeurs = valeurs.replace(['msr', 'mok', 'nsk', 'none', 'nan'], 'msk')
             
             nb_win = (valeurs == 'x').sum()
             nb_pres = valeurs.str.count(r'/').sum()
@@ -171,7 +171,7 @@ if df_mois is not None and not df_mois.empty:
             
             tous_les_scores[joueur] = (total, jours_joues)
             if jours_joues >= seuil_minimum:
-                scores_qualifies[joueur] = (total, jours_joues)
+                scores_qualifies[joueur] = total
             else:
                 scores_disqualifies[joueur] = (total, jours_joues)
         
@@ -185,3 +185,34 @@ if df_mois is not None and not df_mois.empty:
                     st.metric(label=f"{joueur} ⚠️", value=f"{total} pts", delta=f"Incomplet ({txt_j})", delta_color="inverse")
                 else:
                     st.metric(label=joueur, value=f"{total} pts", delta=f"Qualifié ({txt_j})")
+
+        # --- LE PODIUM DES 3 PREMIERS ---
+        st.markdown("---")
+        st.subheader("🏆 Le Podium du Mois (Joueurs Qualifiés)")
+        
+        if scores_qualifies:
+            # Tri des joueurs qualifiés par score décroissant
+            joueurs_tries = sorted(scores_qualifies.items(), key=lambda x: x[1], reverse=True)
+            
+            # Affichage sur 3 colonnes pour le podium
+            col1, col2, col3 = st.columns(3)
+            
+            # 1ère Place - Or
+            if len(joueurs_tries) >= 1:
+                with col1:
+                    st.success(f"🥇 **1ère Place : {joueurs_tries[0][0]}**")
+                    st.metric(label="Score maximal", value=f"{joueurs_tries[0][1]} pts")
+            
+            # 2ème Place - Argent
+            if len(joueurs_tries) >= 2:
+                with col2:
+                    st.info(f"🥈 **2ème Place : {joueurs_tries[1][0]}**")
+                    st.metric(label="Score", value=f"{joueurs_tries[1][1]} pts")
+            
+            # 3ème Place - Bronze
+            if len(joueurs_tries) >= 3:
+                with col3:
+                    st.warning(f"🥉 **3ème Place : {joueurs_tries[2][0]}**")
+                    st.metric(label="Score", value=f"{joueurs_tries[2][1]} pts")
+        else:
+            st.info("Aucun joueur n'a encore atteint le seuil minimum de jours joués pour se qualifier sur le podium.")

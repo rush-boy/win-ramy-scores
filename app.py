@@ -37,8 +37,8 @@ mois_cle = st.sidebar.selectbox(
 FILE_PATH = f"scores_{mois_cle}_{annee_actuelle}.csv"
 st.sidebar.info(f"📂 Fichier actif : `{FILE_PATH}`")
 
-# Liste officielle des joueurs
-liste_joueurs = ['MR', 'MT', 'Kathaï', 'Sissy', 'Maxou', 'Seb', 'Stéphanou', 'Mickaël', 'Céline']
+# Liste officielle des joueurs (Ajout d'Elsa)
+liste_joueurs = ['MR', 'MT', 'Kathaï', 'Sissy', 'Maxou', 'Seb', 'Stéphanou', 'Mickaël', 'Céline', 'Elsa']
 
 # Fonction pour générer la liste exacte des jours ouvrés (Lun au Ven)
 def generer_jours_ouvres():
@@ -83,7 +83,8 @@ def obtenir_tableau_final():
             'Seb': ['', 'msk', '', '', '', '', '/', '', '', 'msk', 'msk', 'msk', '/', '', '', '/', '', '', '', '', '', ''],
             'Stéphanou': ['msk', 'X', '/', '', 'msk', '', '', 'msk', '', '', '', '', 'X', 'msk', '', 'msk', 'msk', '/', '', '', '', ''],
             'Mickaël': ['', '', '', '', '', '/', '', '', '', '/', '', '', 'X', '/', '', '', 'msk', '', '', '', '', ''],
-            'Céline': ['/', 'msk', '/', 'msk', 'X', '/', '/', 'X', '/', 'X', '/', 'msk', 'msk', 'X', '', 'X', '/', 'X', '', '', '', '']
+            'Céline': ['/', 'msk', '/', 'msk', 'X', '/', '/', 'X', '/', 'X', '/', 'msk', 'msk', 'X', '', 'X', '/', 'X', '', '', '', ''],
+            'Elsa': ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']
         }
         df = pd.DataFrame(donnees_septembre, index=dates_semaine_attendues)
         df.index.name = 'DATE'
@@ -192,7 +193,7 @@ if df_mois is not None and not df_mois.empty:
         
         if scores_qualifies:
             # Tri des joueurs qualifiés par score décroissant
-            joueurs_tries = sorted(scores_qualifies.items(), key=lambda x: x[1], reverse=True)
+            joueurs_tries = sorted(scores_qualifies.items(), key=lambda x: x, reverse=True)
             
             # Affichage sur 3 colonnes pour le podium
             col1, col2, col3 = st.columns(3)
